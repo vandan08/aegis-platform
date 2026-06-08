@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ============================================================
+         Aegis Platform — Zero-Trust IAM + Policy-Enforcing Gateway
+         Parent (aggregator) POM.
+         ============================================================ -->
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.0</version>
+        <relativePath/> <!-- look up parent from repository -->
+    </parent>
+
+    <groupId>com.aegis</groupId>
+    <artifactId>aegis-platform</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Aegis Platform</name>
+    <description>Zero-Trust Identity &amp; Access platform: OAuth2/OIDC authorization server, policy-enforcing API gateway, and demo resource service.</description>
+
+    <modules>
+        <module>aegis-auth-server</module>
+        <module>aegis-gateway</module>
+        <module>aegis-resource-demo</module>
+    </modules>
+
+    <properties>
+        <java.version>25</java.version>
+        <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Spring Cloud release train that supports Spring Boot 4.1 -->
+        <spring-cloud.version>2025.1.2</spring-cloud.version>
+        <!-- Boot 4.1 declares managed Testcontainers deps via ${testcontainers.version}
+             but ships no default value, so integration-test modules must pin it here. -->
+        <testcontainers.version>1.20.4</testcontainers.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+</project>
