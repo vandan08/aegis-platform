@@ -1,0 +1,54 @@
+# Local infrastructure for the Aegis platform.
+# Start with:  docker compose up -d
+services:
+  postgres:
+    image: postgres:18
+    container_name: aegis-postgres
+    environment:
+      POSTGRES_DB: aegis_auth
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: aegis   # DEV ONLY
+    ports:
+      - "5432:5432"
+    volumes:
+      - aegis-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis_auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8
+    container_name: aegis-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Policy Decision Point (Phase 3). Loads the versioned Rego policies from ./policies
+  # and serves allow/deny decisions to the gateway at :8181.
+  opa:
+    image: openpolicyagent/opa:1.0.0
+    container_name: aegis-opa
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--log-level=info"
+      - "/policies"
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./policies:/policies:ro
+    healthcheck:
+      test: ["CMD", "/opa", "version"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  aegis-pg-data:
