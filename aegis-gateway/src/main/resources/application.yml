@@ -1,0 +1,58 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: aegis-gateway
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Gateway discovers the JWKS from the auth server and validates every token.
+          issuer-uri: http://localhost:9000
+
+# Fine-grained authorization (Phase 3): the gateway asks OPA (the Policy Decision
+# Point) to allow/deny each authenticated request. Fail-closed on any PDP error.
+aegis:
+  authz:
+    opa:
+      enabled: true
+      url: http://localhost:8181
+      decision-path: /v1/data/aegis/authz/allow
+      timeout: 500ms
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: resource-demo
+              uri: http://localhost:8081
+              predicates:
+                - Path=/api/demo/**
+              filters:
+                # Redis token-bucket rate limiter: 10 req/s sustained, burst 20.
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: 10
+                    redis-rate-limiter.burstCapacity: 20
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    org.springframework.security: INFO
