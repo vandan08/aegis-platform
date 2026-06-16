@@ -1,0 +1,48 @@
+server:
+  port: 9000
+
+spring:
+  application:
+    name: aegis-auth-server
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/aegis_auth
+    username: aegis
+    password: aegis   # DEV ONLY — override via env/secret in real environments
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate   # schema is owned by Flyway, never by Hibernate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+# The public issuer URI other services use to discover / validate tokens.
+# In Phase 1 this points at localhost; make it configurable per environment.
+  security:
+    oauth2:
+      authorizationserver:
+        issuer: http://localhost:9000
+
+# Aegis-specific security tuning.
+aegis:
+  security:
+    lockout:
+      max-attempts: 5          # consecutive failures before a temporary lock
+      lockout-duration: 15m    # how long the account stays locked
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    org.springframework.security: INFO
