@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Aegis — Sign in</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0;
+               display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; }
+        .card { background: #1e293b; padding: 2rem 2.25rem; border-radius: 12px; width: 320px;
+                box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+        h1 { font-size: 1.25rem; margin: 0 0 1.25rem; }
+        label { display: block; font-size: .8rem; margin: .75rem 0 .25rem; color: #94a3b8; }
+        input { width: 100%; box-sizing: border-box; padding: .55rem .65rem; border-radius: 6px;
+                border: 1px solid #334155; background: #0f172a; color: #e2e8f0; }
+        button { width: 100%; margin-top: 1.25rem; padding: .6rem; border: 0; border-radius: 6px;
+                 background: #6366f1; color: white; font-weight: 600; cursor: pointer; }
+        .hint { font-size: .7rem; color: #64748b; margin-top: .25rem; }
+        .msg { font-size: .8rem; padding: .5rem .65rem; border-radius: 6px; margin-bottom: 1rem; }
+        .error { background: #7f1d1d; color: #fecaca; }
+        .ok { background: #14532d; color: #bbf7d0; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>🛡️ Aegis — Sign in</h1>
+    <div class="msg error" th:if="${param.error}">Invalid credentials or one-time code.</div>
+    <div class="msg ok" th:if="${param.logout}">You have been signed out.</div>
+    <form method="post" th:action="@{/login}">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autofocus required/>
+
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required/>
+
+        <label for="otp">One-time code</label>
+        <input type="text" id="otp" name="otp" inputmode="numeric" autocomplete="one-time-code"/>
+        <div class="hint">Only required if MFA is enabled on your account.</div>
+
+        <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+        <button type="submit">Sign in</button>
+    </form>
+</div>
+</body>
+</html>
