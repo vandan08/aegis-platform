@@ -1,0 +1,16 @@
+apiVersion: v2
+name: aegis
+description: >-
+  Zero-Trust Identity & Access platform — OAuth2/OIDC authorization server, a
+  policy-enforcing API gateway, and a protected demo service.
+type: application
+version: 0.1.0            # chart version
+appVersion: "0.1.0"      # Aegis app version
+keywords:
+  - zero-trust
+  - oauth2
+  - oidc
+  - api-gateway
+  - security
+maintainers:
+  - name: Aegis Platform

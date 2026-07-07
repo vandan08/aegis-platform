@@ -58,25 +58,49 @@ Goal: move from "authenticated?" to "allowed to do *this*?".
 > already carries `tenant` and `ip`), an OPA bundle server instead of a mounted volume, and
 > decision logging shipped to the audit stream.
 
-## Phase 4 — Production hardening & observability
-- [ ] mTLS between gateway ↔ services (service identity, not just user identity)
-- [ ] OpenTelemetry tracing across all three services; Prometheus + Grafana dashboards
-- [ ] Structured JSON logging with correlation/trace IDs (never log tokens)
-- [ ] Rate limiting per-client/per-user (not just per-route); circuit breakers (Resilience4j)
-- [ ] Secrets via Vault or cloud secret manager (not application.yml)
+## Phase 4 — Production hardening & observability ✅ DONE
+- [x] mTLS between gateway ↔ services (service identity, not just user identity): dev CA + signed
+      client/server certs (`scripts/gen-dev-certs.*`), opt-in `mtls` profile on both sides
+      (Boot SSL bundles; resource-demo `client-auth: need`, gateway presents its client cert)
+- [x] OpenTelemetry tracing across all three services (Micrometer → OTLP → Jaeger); Prometheus +
+      Grafana dashboards (docker-compose `jaeger`/`prometheus`/`grafana`, datasources provisioned)
+- [x] Structured JSON logging with correlation/trace IDs, never logging tokens (Boot native ECS
+      structured logging under the `prod` profile; traceId/spanId in the MDC via Micrometer Tracing)
+- [x] Rate limiting per-client/per-user, not just per-route (`principalOrClientKeyResolver`);
+      circuit breakers (Resilience4j `CircuitBreaker` filter + local 503 fallback)
+- [x] Secrets via Vault (docker-compose `vault` in dev mode; `vault` profile on the auth server
+      imports `vault://` via Spring Cloud Vault; datasource creds env-first everywhere;
+      seed with `scripts/vault-seed.*`)
 
-## Phase 5 — DevSecOps & delivery
-- [ ] GitHub Actions CI: build, test, **dependency scan** (OWASP Dependency-Check / Trivy),
-      SAST (Semgrep), container scan; fail on critical CVEs
-- [ ] SBOM generation (CycloneDX) per service
-- [ ] Multi-stage Dockerfiles; Kubernetes manifests / Helm chart; deploy to a cloud free tier
-- [ ] Security tests: token tampering, expired token, `alg=none`, scope escalation, rate-limit bypass
+> Deferred / follow-ups: move the **JWT signing-key private material** (still PEM in Postgres,
+> flagged since Phase 2) into Vault's transit engine or a KMS/HSM; production Vault auth
+> (AppRole/K8s instead of dev token); mTLS for auth-server JWKS traffic and Redis/Postgres links.
 
-## Phase 6 — Polish & storytelling (what actually lands interviews)
-- [ ] Architecture diagrams + a short design doc explaining trade-offs
-- [ ] Threat model kept current; a "how I'd attack this" section
-- [ ] Demo script / short recording; live demo URL
-- [ ] README with badges (build, coverage, SBOM), clear quickstart
+## Phase 5 — DevSecOps & delivery (in progress)
+- [x] GitHub Actions CI (`.github/workflows/ci.yml`): build + test (incl. Testcontainers IT on the
+      Docker-enabled runner), OPA policy tests, **SAST** (Semgrep), **Trivy** filesystem scan
+      (vuln + secret + misconfig → SARIF) and **container image scans** for all three services.
+      CVE gating is report-only for now (flip Trivy `exit-code` to 1 to fail on CRITICAL/HIGH).
+- [x] SBOM generation (CycloneDX) per module — Boot-native execution writes
+      `META-INF/sbom/application.cdx.json` into each jar; uploaded as a CI artifact
+- [x] Multi-stage Dockerfiles per service (Temurin 25 build → JRE runtime, non-root, healthcheck)
+- [x] Helm chart (`deploy/helm/aegis`) — 3 Deployments + Services, ConfigMap/Secret, gateway
+      Ingress, K8s liveness/readiness probes, hardened pod securityContext (helm lint + template OK)
+- [ ] Deploy to a cloud free tier (needs a cluster + registry; chart is ready)
+- [x] Security tests: token tampering, expired, `alg=none`, untrusted key, wrong issuer, malformed
+      (`TokenSecurityTest`) + scope escalation (`authz_test.rego`)
+- [x] Remaining security tests: rate-limit bypass (`RateLimitConfigTest`) + refresh-token replay
+      (`RefreshTokenRotationIntegrationTest` — full auth-code+PKCE flow, rotation & replay-reject)
+
+> Note: GitHub Actions Linux runners provide Docker, so CI runs the full `mvnw verify` including the
+> `*IntegrationTest` classes (Testcontainers Postgres) — the ones skipped in local dev here.
+
+## Phase 6 — Polish & storytelling (what actually lands interviews) (in progress)
+- [x] Architecture diagram (Mermaid in `ARCHITECTURE.md`) + design rationale ("Key security decisions")
+- [x] Threat model kept current; a "how I'd attack this" red-team narrative (`THREAT_MODEL.md`)
+- [x] Demo script (`docs/DEMO.md`) — ~5-min end-to-end walkthrough
+- [ ] Short recording + a live demo URL (needs the cloud deploy above)
+- [x] README with badges (CI, SBOM, status) + clear quickstart
 
 ---
 

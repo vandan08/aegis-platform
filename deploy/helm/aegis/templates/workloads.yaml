@@ -1,0 +1,89 @@
+{{- /*
+  Renders a Deployment + Service for each Aegis service. They share the same shape
+  (Spring Boot on the JVM, config via envFrom, actuator probes), so we loop rather
+  than repeat three near-identical manifests.
+  In-cluster, Spring Boot auto-enables the liveness/readiness probe endpoints because
+  it detects Kubernetes, so /actuator/health/{liveness,readiness} are available.
+*/ -}}
+{{- $services := list
+  (dict "name" "aegis-auth-server"   "cfg" .Values.authServer)
+  (dict "name" "aegis-gateway"       "cfg" .Values.gateway)
+  (dict "name" "aegis-resource-demo" "cfg" .Values.resourceDemo) -}}
+{{- range $svc := $services }}
+{{- $name := $svc.name }}
+{{- $cfg := $svc.cfg }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aegis.labels" $ | nindent 4 }}
+    {{- include "aegis.selectorLabels" $name | nindent 4 }}
+spec:
+  replicas: {{ $cfg.replicas }}
+  selector:
+    matchLabels:
+      {{- include "aegis.selectorLabels" $name | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aegis.labels" $ | nindent 8 }}
+        {{- include "aegis.selectorLabels" $name | nindent 8 }}
+      annotations:
+        # Let Prometheus discover the pod's metrics endpoint.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: {{ $cfg.port | quote }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ $name }}
+          image: {{ include "aegis.image" (dict "root" $ "name" $name) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $cfg.port }}
+          envFrom:
+            - configMapRef:
+                name: aegis-config
+            - secretRef:
+                name: {{ $.Values.secrets.existingSecret | default "aegis-secrets" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aegis.labels" $ | nindent 4 }}
+spec:
+  selector:
+    {{- include "aegis.selectorLabels" $name | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $cfg.port }}
+      targetPort: http
+{{- end }}

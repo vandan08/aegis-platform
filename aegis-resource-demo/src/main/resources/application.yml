@@ -14,7 +14,55 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,sbom
   endpoint:
     health:
       show-details: when-authorized
+  # Observability (Phase 4): Prometheus metrics + OTLP tracing. Trace context arrives
+  # from the gateway on the incoming request, so downstream spans stitch into one trace.
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${AEGIS_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+---
+# Container / production profile: ECS JSON logs on stdout, each line carrying traceId/spanId.
+spring:
+  config:
+    activate:
+      on-profile: prod
+logging:
+  structured:
+    format:
+      console: ecs
+
+---
+# mTLS profile (Phase 4): serve HTTPS and REQUIRE a client certificate signed by the
+# dev CA. Only workloads holding a CA-issued client cert (i.e. the gateway) can even
+# open a connection — the JWT is then still validated on top (defense in depth).
+# Generate the material first: scripts/gen-dev-certs.ps1 (or .sh).
+spring:
+  config:
+    activate:
+      on-profile: mtls
+  ssl:
+    bundle:
+      jks:
+        server-mtls:
+          keystore:
+            location: ${AEGIS_CERTS_DIR:file:../certs}/resource-demo-keystore.p12
+            password: ${AEGIS_CERTS_PASSWORD:changeit}   # DEV ONLY — see docs/ROADMAP.md
+            type: PKCS12
+          truststore:
+            location: ${AEGIS_CERTS_DIR:file:../certs}/truststore.p12
+            password: ${AEGIS_CERTS_PASSWORD:changeit}
+            type: PKCS12
+server:
+  ssl:
+    bundle: server-mtls
+    client-auth: need   # no CA-signed client cert -> TLS handshake fails, request never lands

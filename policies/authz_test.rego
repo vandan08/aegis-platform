@@ -66,6 +66,16 @@ test_write_allowed_in_business_hours if {
 	}
 }
 
+test_read_scope_cannot_escalate_to_write if {
+	# A caller holding only demo.read must not be able to perform a write, even in business hours.
+	not allow with input as {
+		"subject": {"id": "alice", "roles": ["USER"], "scopes": ["demo.read"]},
+		"action": "POST",
+		"resource": {"path": "/api/demo/thing", "segments": ["api", "demo", "thing"]},
+		"context": {"hour": 10},
+	}
+}
+
 test_anonymous_denied_by_default if {
 	not allow with input as {
 		"subject": {"id": "", "roles": [], "scopes": []},

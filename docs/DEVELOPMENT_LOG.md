@@ -5,6 +5,174 @@ Format: date · what changed · why · anything the next session needs to know.
 
 ---
 
+## 2026-07-07 (later) — Finish Phase 5 + Phase 6 polish
+**What:**
+- **Helm chart** `deploy/helm/aegis`: a templated `workloads.yaml` loops the three services into
+  Deployments + ClusterIP Services (DRY), a shared `ConfigMap` (issuer/OTLP/backing-service env) +
+  DEV `Secret` (or `secrets.existingSecret` for real deploys), and a gateway-only `Ingress`.
+  K8s liveness/readiness probes (Boot auto-enables the probe endpoints in-cluster), hardened pod
+  securityContext (runAsNonRoot, drop ALL caps, no priv-esc, seccomp RuntimeDefault), Prometheus
+  scrape annotations. **Verified with a downloaded Helm 3.16.3:** `helm lint` clean and
+  `helm template` renders 9 objects; `existingSecret`/`ingress.enabled=false` conditionals work.
+- **Remaining security tests:**
+  - `RateLimitConfigTest.sameCallerGetsSameKeyRegardlessOfPathOrHeaders` — rate-limit bypass
+    resistance (key derives from principal, not path/headers). **Passes locally.**
+  - `RefreshTokenRotationIntegrationTest` — full Authorization-Code + PKCE flow against Testcontainers
+    Postgres (form login w/ CSRF + session cookies via `java.net.http.HttpClient`, authorize→code,
+    code→tokens), then asserts a refresh returns a *new* refresh token (rotation) and replaying the
+    *old* one yields `400 invalid_grant`. **Compiles locally; runs in CI** (needs Docker).
+- **Phase 6 storytelling:** Mermaid **system diagram** in `ARCHITECTURE.md`; a **"how I'd attack
+  this"** red-team narrative in `THREAT_MODEL.md` (7 attacker moves → where each dies, + honest gaps);
+  a ~5-min **demo script** `docs/DEMO.md`; README docs list + status refreshed.
+
+**Why:** Close out the deliverable/hardening phase and add the interview-facing polish — a diagram,
+an attacker narrative, and a runnable demo are what actually communicate the work.
+
+**Decisions / notes:**
+- The refresh-replay test is named `*IntegrationTest` so the **local test filter is now
+  `!*IntegrationTest`** (was `!AuthServerIntegrationTest`) — two Testcontainers tests exist now.
+- **Two hardening items deliberately NOT coded** (would be unrunnable/broken without live infra):
+  moving the JWT signing key into **Vault transit/KMS** and switching Vault to **AppRole** auth.
+  Both are designed and documented (ROADMAP + threat model) as the next hardening step.
+
+**Verified here (JDK 24):** auth-server `test-compile` green (new IT compiles); gateway
+`RateLimitConfigTest` 4/4 green; Helm lint + template clean. Not runnable locally (CI/infra):
+`RefreshTokenRotationIntegrationTest` (Docker), the Actions workflow, Semgrep/Trivy, live deploy.
+
+**Next session should:** live cloud deploy (any k8s + registry) to unlock the demo URL + recording;
+then the Vault-transit signing-key migration.
+
+---
+
+## 2026-07-07 — Phase 5 (DevSecOps & delivery)
+**What:**
+- **Security tests (JWT attacks):** `TokenSecurityTest` (resource-demo) forges/mangles tokens the
+  way an attacker would and asserts **401** every time: `alg=none` (signature stripping), token
+  signed by an untrusted key, payload tampered after signing (scope escalation attempt), expired,
+  wrong issuer, and malformed input — plus a positive control that a genuine token still gets 200.
+  Added a scope-escalation case to the policy suite (`authz_test.test_read_scope_cannot_escalate_to_write`).
+- **Multi-stage Dockerfiles** per service (Temurin 25 JDK build → JRE runtime): POM-first layer for
+  dependency caching, non-root `aegis` user, `MaxRAMPercentage`, and a `/actuator/health` HEALTHCHECK.
+  Added `.dockerignore` (keeps `target/`, `certs/`, secrets out of the build context).
+- **SBOM:** declared the `cyclonedx-maven-plugin` bare so **Spring Boot's native SBOM** execution
+  activates — writes `target/classes/META-INF/sbom/application.cdx.json` into each jar and serves it
+  at the actuator `sbom` endpoint (exposed but left authenticated — a dependency list aids attackers).
+- **CI:** `.github/workflows/ci.yml` (push/PR to main), least-privilege token, concurrency-cancel:
+  build+test on JDK 25 (`mvnw verify` — runs the full suite *including* `AuthServerIntegrationTest`
+  since GitHub's Linux runners have Docker for Testcontainers) with SBOM artifacts; OPA policy tests;
+  Semgrep SAST; Trivy fs scan (vuln+secret+misconfig → SARIF to the Security tab); Trivy image scans
+  of all three containers. CVE gating report-only for now (documented how to flip it to blocking).
+
+**Why:** Phase 5 makes the platform *deliverable and provably hardened* — the security posture is now
+enforced by tests and a pipeline, not just asserted in prose.
+
+**Gotchas / decisions:**
+- **Found and removed an abandoned, uncompilable stub** `security/TokenAttackTest.java` (truncated
+  mid-Javadoc, never tracked in git) — it was breaking `testCompile`. Its intended cases are all
+  covered by the new `TokenSecurityTest`; folded in the one it was missing (malformed token → 401).
+- First tried a custom `cyclonedx` config with `makeAggregateBom`/`makeBom` bound to `package`;
+  it double-executed and failed (exit 255) because **the Boot 4.1 parent already manages a cyclonedx
+  execution**. Bare plugin declaration is the idiomatic fix and yields the Boot-native SBOM.
+- Dockerfile HEALTHCHECK uses `/actuator/health` (always present + permitted); the readiness probe
+  path isn't exposed outside Kubernetes by default.
+
+**Verified here (JDK 24, `-Dmaven.compiler.release=24`):** `TokenSecurityTest` 7/7 green;
+scope-escalation rego case added; native SBOM generation confirmed (169 components for the gateway);
+full `package` (minus the Testcontainers IT) builds all modules + SBOMs.
+
+**Could not run here:** the GitHub Actions workflow itself, `opa test`, Trivy/Semgrep, and Docker
+image builds (no Docker / no OPA binary locally) — all wired and will run in CI.
+
+**Next session should:** finish Phase 5 (K8s manifests / Helm chart + a cloud free-tier deploy;
+rate-limit-bypass + refresh-replay tests), then Phase 6 (diagrams, demo recording, live URL).
+
+---
+
+## 2026-07-06 (later) — Phase 4 COMPLETE (mTLS + Vault secrets) + login-page redesign
+**What:**
+- **mTLS gateway↔resource-demo (service identity):** `scripts/gen-dev-certs.ps1`/`.sh` build a dev
+  CA and CA-signed identities (server cert `CN=aegis-resource-demo` with `eku=serverAuth`, client
+  cert `CN=aegis-gateway` with `eku=clientAuth`) into gitignored `certs/`. An opt-in **`mtls`
+  profile** on both services wires them via Boot **SSL bundles**: resource-demo serves HTTPS with
+  `client-auth: need`; the gateway's proxy HttpClient uses
+  `spring.cloud.gateway.server.webflux.httpclient.ssl.ssl-bundle` (property name verified against
+  the SCG 5.0.2 jar's config metadata) and the route flips to `https://` via the new
+  `aegis.routes.resource-demo-uri` placeholder.
+- **Secrets via Vault:** docker-compose `vault` (dev mode, root token `aegis-dev-token`, DEV ONLY);
+  auth server gained `spring-cloud-starter-vault-config` and a **`vault` profile**
+  (`spring.config.import: vault://`, KV v2 `secret/aegis-auth-server`), inert by default
+  (`spring.cloud.vault.enabled: false`). Datasource creds are now env-first
+  (`DB_URL`/`DB_USERNAME`/`DB_PASSWORD`) so nothing requires editing YAML. Seed via
+  `scripts/vault-seed.ps1`/`.sh` (plain KV v2 REST, no vault CLI needed).
+- **Login page redesign** (the first thing anyone sees of the app): split-screen product page —
+  left brand panel with the zero-trust story ("Trust nothing. Verify everything."), animated CSS
+  aurora, shield mark, and three feature cards (verify-every-hop, policy-as-code, hardened-by-default);
+  right glassmorphism sign-in card with proper focus states, `autocomplete` hints, a11y roles, and
+  a DEV-marked demo-credentials hint. Deliberately zero JS / zero CDN (CSP-friendly, offline-safe);
+  responsive (brand panel collapses under 900px).
+
+**Verified here:**
+- Cert script runs clean (keytool, JDK 24). **Live mTLS test:** resource-demo booted with the
+  `mtls` profile (Tomcat on 8081 **https**); connection **without** a client cert → TLS handshake
+  rejected; with the gateway's CA-signed cert → `200 {"status":"UP"}` from /actuator/health.
+- Full build + runnable test suite green with the Vault starter resolved from the Oakwood BOM.
+- Windows gotcha: the bundled curl (Schannel) won't send a P12 client cert — used .NET
+  `HttpWebRequest.ClientCertificates` for the positive test.
+
+**Could not run here:** live Vault round-trip (Docker down) — wired, will light up with
+`docker compose up -d` + `scripts/vault-seed.ps1` + `SPRING_PROFILES_ACTIVE=vault`.
+
+**Notes / deferred (tracked in ROADMAP):** signing-key private material is still PEM in Postgres
+(next: Vault transit/KMS); Vault dev-token auth and plain HTTP are DEV ONLY; JWKS traffic and
+Redis/Postgres links are not yet mTLS.
+
+**Next session should:** Phase 5 (GitHub Actions CI with dependency/container scanning + SAST,
+SBOM, Dockerfiles/Helm, security tests — token tampering, `alg=none`, scope escalation).
+
+---
+
+## 2026-07-06 — Phase 4 (observability & resilience — first slice)
+**What:** Took the observability + resilience core of Phase 4; mTLS and Vault/secrets are the two
+remaining Phase-4 items (still unchecked in ROADMAP).
+- **Distributed tracing** across all three services: added `micrometer-tracing-bridge-otel` +
+  `opentelemetry-exporter-otlp`. Traces export over OTLP to `${AEGIS_OTLP_ENDPOINT:http://localhost:4318/v1/traces}`.
+  Sampling is 1.0 in dev. Because Micrometer Tracing is now on the classpath, Boot auto-adds the
+  `[app,traceId,spanId]` correlation fields to console logs, and trace context propagates gateway →
+  resource-demo so spans stitch into one end-to-end trace.
+- **Metrics:** added `micrometer-registry-prometheus` so `/actuator/prometheus` actually serves;
+  every meter is tagged `application=<service>`. Permitted `/actuator/prometheus` + `/actuator/info`
+  (alongside health) in all three security configs so the collector can scrape without a JWT (prod
+  note in-code: bind the management port to an internal network instead).
+- **Structured JSON logging:** a `prod` Spring profile switches console output to ECS JSON
+  (Boot 4.1 native `logging.structured.format.console: ecs`) — 12-factor stdout logs carrying
+  traceId/spanId, no tokens. Dev stays human-readable.
+- **Per-caller rate limiting (gateway):** new `principalOrClientKeyResolver` (`resilience/RateLimitConfig`)
+  keys the Redis token bucket on `user:<sub>` or `client:<client_id>` instead of per-route, so one
+  caller can't drain everyone's budget. Wired via `key-resolver` on the `RequestRateLimiter` filter.
+- **Circuit breaker (gateway):** Resilience4j `CircuitBreaker` filter on the resource-demo route
+  (`spring-cloud-starter-circuitbreaker-reactor-resilience4j`) with a local `forward:/fallback/resource-demo`
+  → `FallbackController` returning a clean 503. Tuned under `resilience4j.circuitbreaker`/`.timelimiter`.
+- **Infra:** docker-compose now runs Jaeger (OTLP in, UI :16686), Prometheus (:9090, scrapes the
+  three services via `host.docker.internal`) and Grafana (:3000, datasources auto-provisioned).
+  New files: `observability/prometheus.yml`, `observability/grafana/provisioning/datasources/…`.
+
+**Why:** "Production hardening & observability" — make the platform debuggable (traces), measurable
+(metrics), operable (JSON logs correlated to traces), and resilient (per-caller fairness + failing
+fast on a sick downstream) before layering on mTLS and a real secrets manager.
+
+**Verified:** `JAVA_HOME=jdk-24 mvnw -Dmaven.compiler.release=24 -Dtest='!AuthServerIntegrationTest' test`
+→ BUILD SUCCESS. Gateway context loads with the tracing/circuit-breaker/rate-limit beans; existing
+edge-auth and whoami tests still pass.
+
+**Could not run here:** live trace export to Jaeger, Prometheus scrape, and the Grafana stack (Docker
+down in this environment) — all wired and will light up with `docker compose up -d`.
+
+**Next session should:** finish Phase 4 — **mTLS** gateway↔services (service identity, keystores +
+a dev CA, a `prod`/`mtls` profile) and **secrets** out of `application.yml` into Vault or a cloud
+secret manager (start with the Postgres creds + the signing-key material called out in Phase 2).
+
+---
+
 ## 2026-07-06 — Phase 3 (fine-grained authorization with OPA)
 **What:**
 - Chose **OPA (Rego)** as the Policy Decision Point. Added an `opa` service to docker-compose

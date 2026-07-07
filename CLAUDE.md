@@ -76,7 +76,47 @@ The Maven wrapper (`mvnw`) is generated. **Build note:** the stack targets Java 
 older JDK is available you can compile/verify with `-Dmaven.compiler.release=<n>` (the code uses no
 Java-25-only syntax). The auth-server integration test needs Docker (Testcontainers Postgres).
 
-## Current status — Phase 3 (fine-grained authorization) COMPLETE
+## Current status — Phases 1–5 DONE; Phase 6 (polish) IN PROGRESS
+**Done (Phase 5 — DevSecOps & delivery):** security posture enforced by tests + a pipeline.
+- **Security tests:** `TokenSecurityTest` rejects `alg=none`, untrusted-key sigs, tampered payloads,
+  expired, wrong issuer, malformed (all → 401) + positive control; `authz_test.rego` blocks scope
+  escalation; `RateLimitConfigTest` proves the limiter key can't be evaded by path/header variation;
+  `RefreshTokenRotationIntegrationTest` drives the full auth-code+PKCE flow and asserts refresh
+  rotation + replay rejection (`invalid_grant`).
+- **CI:** `.github/workflows/ci.yml` — build+test on JDK 25 (full `mvnw verify` incl. Testcontainers
+  ITs on the Docker runner), OPA policy tests, Semgrep SAST, Trivy fs + image scans (SARIF). Report-only CVE gate.
+- **SBOM:** Boot-native CycloneDX per module (`META-INF/sbom/application.cdx.json`, `sbom` endpoint).
+- **Containers + K8s:** multi-stage Dockerfiles (non-root, healthcheck) + `.dockerignore`; Helm chart
+  `deploy/helm/aegis` (3 Deployments/Services, ConfigMap/Secret, gateway Ingress, probes, hardened
+  securityContext — helm lint/template verified).
+
+**Done (Phase 6 so far):** Mermaid system diagram (`ARCHITECTURE.md`), "how I'd attack this"
+red-team narrative (`THREAT_MODEL.md`), demo script (`docs/DEMO.md`), README badges/quickstart.
+**Remaining:** live cloud deploy + recording; hardening follow-ups (signing key → Vault transit,
+Vault AppRole auth, mTLS for JWKS/datastore links) — all designed & documented, need infra to ship.
+
+**Done (Phase 4):** observability, resilience, service identity, and secrets.
+- **mTLS gateway↔resource-demo:** opt-in `mtls` profile on both services (Boot SSL bundles;
+  resource-demo `client-auth: need`, gateway presents a CA-signed client cert via
+  `...httpclient.ssl.ssl-bundle`). Dev CA + certs from `scripts/gen-dev-certs.ps1|sh` → `certs/`
+  (gitignored). Verified live: no client cert → handshake rejected; gateway cert → 200.
+- **Secrets:** Vault in docker-compose (:8200, dev mode); auth server `vault` profile imports
+  `vault://` (KV v2 `secret/aegis-auth-server`, seed via `scripts/vault-seed.ps1|sh`); datasource
+  creds are env-first (`DB_URL`/`DB_USERNAME`/`DB_PASSWORD`). Vault is inert unless the profile is on.
+- **Login page** redesigned as a split-screen product page (brand story + glass sign-in card,
+  zero JS/CDN, responsive) — the app's first impression.
+- **Tracing:** all three services bridge Micrometer Tracing → OpenTelemetry → OTLP
+  (`${AEGIS_OTLP_ENDPOINT:http://localhost:4318/v1/traces}`); trace context propagates edge→downstream.
+- **Metrics:** `micrometer-registry-prometheus` serves `/actuator/prometheus` (tagged
+  `application=<service>`); scrape + info endpoints are permitted for the collector.
+- **Logs:** `prod` profile emits ECS JSON on stdout with traceId/spanId (Boot 4.1 native structured
+  logging); dev stays human-readable. Never logs tokens.
+- **Resilience (gateway):** per-user/per-client rate-limit key (`principalOrClientKeyResolver`) +
+  Resilience4j `CircuitBreaker` on the resource-demo route with a local 503 fallback
+  (`com.aegis.gateway.resilience`).
+- **Infra:** docker-compose adds Jaeger (:16686), Prometheus (:9090), Grafana (:3000);
+  config in `observability/`.
+
 **Done (Phase 3):** the gateway is now a real PEP that authorizes, not just authenticates.
 - **OPA (Rego)** is the Policy Decision Point — `opa` service in docker-compose (:8181) loads
   `policies/`. Policies are code: `policies/authz.rego` (+ `authz_test.rego`, run `opa test policies/`).
@@ -111,9 +151,11 @@ dependency; Boot manages Testcontainers only via `${testcontainers.version}` (no
 in the parent POM).
 
 **Known shortcuts still intentional (tracked in ROADMAP):**
-- Demo creds `admin` / `changeit`; service-client secret `service-secret` — DEV ONLY.
-- Signing-key private material is stored PEM in Postgres (move to KMS/HSM in Phase 4).
-- No CI yet (Phase 5); no policy engine yet (Phase 3).
+- Demo creds `admin` / `changeit`; service-client secret `service-secret`; cert/Vault dev
+  passwords (`changeit` / `aegis-dev-token`) — all DEV ONLY.
+- Signing-key private material is still PEM in Postgres (follow-up: Vault transit / KMS).
+- Vault runs dev-mode with token auth over plain HTTP; JWKS + Redis/Postgres links not yet mTLS.
+- No CI yet (Phase 5).
 
 ## Conventions
 - Java package root: `com.aegis.<module>` (e.g. `com.aegis.gateway`).

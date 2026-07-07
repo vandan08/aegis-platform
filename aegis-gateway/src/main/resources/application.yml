@@ -33,26 +33,109 @@ aegis:
         webflux:
           routes:
             - id: resource-demo
-              uri: http://localhost:8081
+              # Plain HTTP in dev; the mtls profile flips this to https (see below).
+              uri: ${aegis.routes.resource-demo-uri:http://localhost:8081}
               predicates:
                 - Path=/api/demo/**
               filters:
-                # Redis token-bucket rate limiter: 10 req/s sustained, burst 20.
+                # Token-bucket rate limiter (Redis). Phase 4: keyed per-user / per-client
+                # (JWT sub or client_id) rather than per-route, so one noisy caller cannot
+                # exhaust everyone else's budget.
                 - name: RequestRateLimiter
                   args:
                     redis-rate-limiter.replenishRate: 10
                     redis-rate-limiter.burstCapacity: 20
+                    key-resolver: "#{@principalOrClientKeyResolver}"
+                # Phase 4: Resilience4j circuit breaker. If the downstream trips the
+                # failure/latency thresholds the breaker opens and requests are served a
+                # local fallback (503) instead of piling onto an unhealthy service.
+                - name: CircuitBreaker
+                  args:
+                    name: resourceDemoCircuitBreaker
+                    fallbackUri: forward:/fallback/resource-demo
+
+# Resilience4j (Phase 4) — tuning for the downstream circuit breaker + its time limiter.
+resilience4j:
+  circuitbreaker:
+    instances:
+      resourceDemoCircuitBreaker:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50          # open once >=50% of a window fails
+        wait-duration-in-open-state: 10s     # stay open this long before probing
+        permitted-number-of-calls-in-half-open-state: 3
+  timelimiter:
+    instances:
+      resourceDemoCircuitBreaker:
+        timeout-duration: 3s                 # a call slower than this counts as a failure
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,gateway
+        include: health,info,metrics,prometheus,gateway,sbom
   endpoint:
     health:
       show-details: when-authorized
+  # Observability (Phase 4): tag every meter with the service name (for Grafana) and
+  # export traces over OTLP. Sample everything in dev; dial down in real environments.
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${AEGIS_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
 
 logging:
   level:
     org.springframework.cloud.gateway: INFO
     org.springframework.security: INFO
+
+---
+# Container / production profile: emit logs as ECS JSON on stdout (12-factor), each line
+# carrying the traceId/spanId Micrometer puts in the MDC so logs correlate with traces.
+# Never logs tokens — only claim-derived identifiers appear in our own log statements.
+spring:
+  config:
+    activate:
+      on-profile: prod
+logging:
+  structured:
+    format:
+      console: ecs
+
+---
+# mTLS profile (Phase 4): service identity between gateway and downstream services.
+# The gateway presents its own client certificate (signed by the dev CA) on every
+# proxied call and only trusts servers signed by that CA — so a stolen user JWT is
+# not enough to talk to a service directly; the caller must ALSO be the gateway.
+# Generate the material first: scripts/gen-dev-certs.ps1 (or .sh).
+spring:
+  config:
+    activate:
+      on-profile: mtls
+  ssl:
+    bundle:
+      jks:
+        gateway-client:
+          keystore:
+            location: ${AEGIS_CERTS_DIR:file:../certs}/gateway-keystore.p12
+            password: ${AEGIS_CERTS_PASSWORD:changeit}   # DEV ONLY — see docs/ROADMAP.md
+            type: PKCS12
+          truststore:
+            location: ${AEGIS_CERTS_DIR:file:../certs}/truststore.p12
+            password: ${AEGIS_CERTS_PASSWORD:changeit}
+            type: PKCS12
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            ssl:
+              ssl-bundle: gateway-client
+aegis:
+  routes:
+    resource-demo-uri: https://localhost:8081

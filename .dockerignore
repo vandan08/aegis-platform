@@ -1,0 +1,13 @@
+# Keep image build context small and secret-free.
+**/target/
+certs/
+*.p12
+*.jks
+*.pem
+*.env
+.git/
+.github/
+.idea/
+observability/
+docs/
+*.md

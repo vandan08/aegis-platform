@@ -6,10 +6,16 @@ spring:
     name: aegis-auth-server
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/aegis_auth
-    username: aegis
-    password: aegis   # DEV ONLY — override via env/secret in real environments
+    # Env-first (12-factor): every credential can be injected without touching this file.
+    # With the `vault` profile active these are overridden straight from Vault instead.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/aegis_auth}
+    username: ${DB_USERNAME:aegis}
+    password: ${DB_PASSWORD:aegis}   # DEV-ONLY default — see docs/ROADMAP.md
     driver-class-name: org.postgresql.Driver
+
+  cloud:
+    vault:
+      enabled: false   # inert by default; switched on by the `vault` profile below
 
   jpa:
     hibernate:
@@ -38,11 +44,53 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,sbom
   endpoint:
     health:
       show-details: when-authorized
+  # Observability (Phase 4): Prometheus metrics + OTLP tracing across the platform.
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${AEGIS_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
 
 logging:
   level:
     org.springframework.security: INFO
+
+---
+# Container / production profile: ECS JSON logs on stdout, each line carrying traceId/spanId.
+spring:
+  config:
+    activate:
+      on-profile: prod
+logging:
+  structured:
+    format:
+      console: ecs
+
+---
+# Secrets-from-Vault profile (Phase 4): SPRING_PROFILES_ACTIVE=vault pulls secrets
+# (e.g. spring.datasource.password) from Vault's KV store at secret/aegis-auth-server,
+# overriding anything in this file. Seed dev secrets with scripts/vault-seed.ps1 (or .sh).
+# TOKEN auth + plain HTTP are DEV ONLY — production uses TLS + AppRole/Kubernetes auth.
+spring:
+  config:
+    activate:
+      on-profile: vault
+    import: vault://
+  cloud:
+    vault:
+      enabled: true
+      uri: ${VAULT_ADDR:http://localhost:8200}
+      authentication: TOKEN
+      token: ${VAULT_TOKEN:aegis-dev-token}   # DEV ONLY — see docs/ROADMAP.md
+      kv:
+        enabled: true
+        backend: secret
+        application-name: aegis-auth-server

@@ -36,7 +36,8 @@ public class DefaultSecurityConfig {
             MfaAuthenticationDetailsSource mfaDetailsSource) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health/**", "/api/register", "/login", "/error").permitAll()
+                        .requestMatchers("/actuator/health/**", "/actuator/prometheus", "/actuator/info",
+                                "/api/register", "/login", "/error").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 // MFA enrollment + registration are JSON APIs, not browser form posts.

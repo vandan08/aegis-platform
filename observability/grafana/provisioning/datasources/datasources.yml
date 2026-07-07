@@ -1,0 +1,16 @@
+# Auto-provisioned Grafana datasources so the dashboards work on first boot:
+#   - Prometheus for metrics
+#   - Jaeger for distributed traces (linked so you can jump metrics -> traces)
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
