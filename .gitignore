@@ -23,6 +23,7 @@ Thumbs.db
 *.pem
 *.p12
 *.jks
+certs/
 
 # Logs
 *.log

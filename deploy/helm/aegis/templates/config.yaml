@@ -1,0 +1,35 @@
+# Shared, non-secret configuration for all three services.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegis-config
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+data:
+  SPRING_PROFILES_ACTIVE: {{ .Values.springProfiles | quote }}
+  AEGIS_OTLP_ENDPOINT: {{ .Values.otlpEndpoint | quote }}
+  # Token issuer / validation (Spring relaxed-binding env var names).
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: {{ .Values.issuerUri | quote }}
+  SPRING_SECURITY_OAUTH2_AUTHORIZATIONSERVER_ISSUER: {{ .Values.issuerUri | quote }}
+  # Backing services.
+  DB_URL: {{ printf "jdbc:postgresql://%s:%v/%s" .Values.postgres.host .Values.postgres.port .Values.postgres.database | quote }}
+  SPRING_DATA_REDIS_HOST: {{ .Values.redis.host | quote }}
+  SPRING_DATA_REDIS_PORT: {{ .Values.redis.port | quote }}
+  AEGIS_AUTHZ_OPA_URL: {{ .Values.opa.url | quote }}
+---
+# DEV-only secret. In production set `secrets.existingSecret` and manage these out-of-band.
+{{- if not .Values.secrets.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aegis-secrets
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  DB_USERNAME: {{ .Values.secrets.dbUsername | quote }}
+  DB_PASSWORD: {{ .Values.secrets.dbPassword | quote }}
+  {{- if .Values.secrets.vaultToken }}
+  VAULT_TOKEN: {{ .Values.secrets.vaultToken | quote }}
+  {{- end }}
+{{- end }}

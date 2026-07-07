@@ -50,5 +50,67 @@ services:
       timeout: 5s
       retries: 10
 
+  # Secrets manager (Phase 4). Runs in DEV mode (in-memory, auto-unsealed) with a fixed
+  # root token — real deployments use TLS, auto-unseal (KMS), and AppRole/K8s auth.
+  # Seed the dev secrets with scripts/vault-seed.ps1 (or .sh), then start the auth
+  # server with SPRING_PROFILES_ACTIVE=vault.
+  vault:
+    image: hashicorp/vault:1.18
+    container_name: aegis-vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: aegis-dev-token   # DEV ONLY
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---- Observability stack (Phase 4) -----------------------------------------
+  # Jaeger receives OTLP traces from all three services (4318 HTTP / 4317 gRPC)
+  # and serves the trace-search UI on 16686.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: aegis-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP (services export here)
+
+  # Prometheus scrapes each service's /actuator/prometheus endpoint.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: aegis-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Grafana visualizes Prometheus metrics and Jaeger traces (datasources auto-provisioned).
+  grafana:
+    image: grafana/grafana:11.5.0
+    container_name: aegis-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin   # DEV ONLY
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+      - jaeger
+
 volumes:
   aegis-pg-data:

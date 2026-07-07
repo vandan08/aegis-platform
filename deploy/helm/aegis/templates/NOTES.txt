@@ -1,0 +1,17 @@
+Aegis platform deployed (release {{ .Release.Name }}).
+
+Services (cluster-internal ClusterIP):
+  - aegis-auth-server    :{{ .Values.authServer.port }}   (OAuth2/OIDC issuer)
+  - aegis-gateway        :{{ .Values.gateway.port }}   (zero-trust PEP — the only ingress)
+  - aegis-resource-demo  :{{ .Values.resourceDemo.port }}   (protected downstream)
+
+{{ if .Values.ingress.enabled -}}
+Public entry point: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- else -}}
+Ingress disabled — port-forward the gateway to test:
+  kubectl port-forward svc/aegis-gateway {{ .Values.gateway.port }}:{{ .Values.gateway.port }}
+{{- end }}
+
+Reminder: this chart assumes Postgres, Redis and OPA already exist in-cluster
+(values.postgres/redis/opa). Secrets default to DEV credentials — for anything real,
+set secrets.existingSecret and supply them via Vault / SealedSecrets / ExternalSecrets.

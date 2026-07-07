@@ -1,0 +1,70 @@
+# Default values for the Aegis platform chart.
+# Override per-environment with `-f my-values.yaml` or `--set`.
+
+# Image coordinates. Images are built from each service's Dockerfile (see .github/workflows).
+image:
+  registry: ghcr.io/aegis
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# The public issuer URI other services use to discover/validate tokens. In-cluster the
+# services reach the auth server by its Service DNS name; the issuer must match what tokens
+# are signed with, so set this to the externally-resolvable issuer in real deployments.
+issuerUri: http://aegis-auth-server:9000
+
+# OTLP trace collector endpoint (e.g. an OpenTelemetry Collector or Jaeger) in-cluster.
+otlpEndpoint: http://otel-collector:4318/v1/traces
+
+# Spring profiles activated in-cluster. `prod` turns on ECS JSON logging on stdout.
+springProfiles: "prod"
+
+# ---- Per-service settings -------------------------------------------------
+authServer:
+  replicas: 1
+  port: 9000
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+
+gateway:
+  replicas: 2                # the edge — run at least two for availability
+  port: 8080
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+
+resourceDemo:
+  replicas: 1
+  port: 8081
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits:   { cpu: 500m, memory: 768Mi }
+
+# ---- Backing services (assumed to exist in-cluster; point these at your instances) ----
+postgres:
+  host: aegis-postgres
+  port: 5432
+  database: aegis_auth
+redis:
+  host: aegis-redis
+  port: 6379
+opa:
+  url: http://aegis-opa:8181
+
+# ---- Secrets ----
+# DEV defaults ONLY. In production supply these via an ExternalSecret / SealedSecret / Vault
+# injector rather than plaintext values, and set existingSecret to consume them.
+secrets:
+  existingSecret: ""       # if set, env is sourced from this Secret instead of the values below
+  dbUsername: aegis
+  dbPassword: aegis
+  vaultToken: ""           # set to enable the `vault` profile path
+
+# ---- Ingress (exposes the gateway only; services stay cluster-internal) ----
+ingress:
+  enabled: true
+  className: nginx
+  host: aegis.local
+  tls:
+    enabled: false
+    secretName: aegis-tls

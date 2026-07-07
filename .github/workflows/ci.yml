@@ -1,0 +1,135 @@
+name: CI
+
+# Build, test, and security-scan the Aegis platform on every push / PR to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least-privilege by default; individual jobs widen as needed (e.g. SARIF upload).
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- Build + test (unit + Testcontainers integration; Linux runners have Docker) ----
+  build-test:
+    name: Build & test (JDK 25)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Build, test & SBOM
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B verify
+
+      - name: Upload SBOMs (CycloneDX)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sboms
+          # Spring Boot's native SBOM location (bundled into each jar).
+          path: '**/target/classes/META-INF/sbom/application.cdx.json'
+          if-no-files-found: warn
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/*'
+          if-no-files-found: ignore
+
+  # ---- Policy-as-code tests (OPA / Rego) ----
+  policy-tests:
+    name: OPA policy tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: latest
+      - name: opa test
+        run: opa test policies/ -v
+
+  # ---- SAST (Semgrep) ----
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep scan
+        # Curated rulesets for Java + Spring + secrets/OWASP; non-blocking findings surface
+        # in the log. Tighten to `--error` once the baseline is clean.
+        run: semgrep ci --config p/java --config p/secrets --config p/owasp-top-ten
+        env:
+          SEMGREP_RULES: ''
+
+  # ---- Dependency + IaC + secret scan (Trivy over the repo) ----
+  trivy-fs:
+    name: Trivy filesystem scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # upload SARIF to the Security tab
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy fs scan (vuln + secret + misconfig)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  # ---- Build container images and scan them (no push; no registry creds needed) ----
+  image-scan:
+    name: Image build + Trivy scan
+    runs-on: ubuntu-latest
+    needs: build-test
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [aegis-auth-server, aegis-gateway, aegis-resource-demo]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          push: false
+          load: true
+          tags: aegis/${{ matrix.service }}:ci
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: aegis/${{ matrix.service }}:ci
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'   # report, don't fail the build yet (flip to 1 to gate on CVEs)

@@ -26,7 +26,9 @@ public class GatewaySecurityConfig {
         http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable) // stateless API; no browser session/cookies
                 .authorizeExchange(exchange -> exchange
-                        .pathMatchers("/actuator/health/**").permitAll()
+                        // Health + Prometheus scrape endpoint reachable without a JWT so the
+                        // metrics collector can pull them; everything else needs a valid token.
+                        .pathMatchers("/actuator/health/**", "/actuator/prometheus", "/actuator/info").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
         return http.build();

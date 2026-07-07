@@ -53,4 +53,17 @@
         </dependencies>
     </dependencyManagement>
 
+    <build>
+        <plugins>
+            <!-- Phase 5: CycloneDX SBOM per module. Declaring the plugin bare activates Spring
+                 Boot's managed execution (version + config from the Boot parent), which writes
+                 target/classes/META-INF/sbom/application.cdx.json — bundled into each jar and
+                 served at runtime via the actuator `sbom` endpoint. -->
+            <plugin>
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>
