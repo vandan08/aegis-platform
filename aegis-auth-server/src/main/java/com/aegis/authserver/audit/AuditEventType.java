@@ -11,5 +11,6 @@ public enum AuditEventType {
     TOKEN_ISSUED,
     USER_REGISTERED,
     MFA_ENROLLED,
-    KEY_ROTATED
+    KEY_ROTATED,
+    AUDIT_CHAIN_VERIFIED
 }
