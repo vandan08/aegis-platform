@@ -100,6 +100,16 @@
             <artifactId>spring-cloud-starter-vault-config</artifactId>
         </dependency>
 
+        <!-- QR encoding for the MFA enrollment page (otpauth:// URI → scannable code).
+             Unlike TOTP (hand-rolled to show the mechanics), QR is presentation, not the
+             point — so use the battle-tested encoder. zxing:core has no transitive deps;
+             the matrix is rendered to inline SVG, so no imaging stack is needed. -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
         <!-- Tests -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -109,6 +119,19 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- @WebMvcTest slice — Boot 4.x moved it out of spring-boot-test-autoconfigure
+             into per-technology modules (same split as the renamed Gateway starter). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Applies spring-security-test (@WithMockUser, csrf()) to auto-configured MockMvc. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-security-test</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- Integration tests against a real Postgres -->

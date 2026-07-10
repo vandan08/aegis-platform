@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Aegis — Set up two-factor authentication</title>
+    <link rel="stylesheet" th:href="@{/css/aegis.css}"/>
+</head>
+<body class="admin">
+
+<header th:replace="~{fragments/ui :: topbar('/ account / two-factor setup')}"></header>
+
+<main class="page page-narrow">
+    <h1>Set up two-factor authentication</h1>
+    <p class="sub">
+        MFA activates only after you confirm a working code, so a scanning mistake can't
+        lock you out. The secret below never leaves this page — treat it like a password.
+    </p>
+
+    <section class="panel">
+        <h2>1 · Scan with your authenticator app</h2>
+        <p class="panel-text">Google Authenticator, 1Password, Authy — anything that speaks TOTP.</p>
+        <!-- Server-rendered SVG of the otpauth:// URI; qrSvg is trusted output of QrSvgRenderer. -->
+        <div class="qr-box" th:utext="${qrSvg}"></div>
+        <p class="panel-text">Can't scan? Enter the secret manually:
+            <code class="secret" th:text="${secret}">SECRET</code></p>
+    </section>
+
+    <section class="panel">
+        <h2>2 · Confirm a code</h2>
+        <div class="msg error" th:if="${error}" th:text="${error}" role="alert"></div>
+        <form method="post" th:action="@{/account/mfa/activate}">
+            <label for="code">6-digit code from the app</label>
+            <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]*"
+                   maxlength="6" autocomplete="one-time-code" placeholder="123456"
+                   autofocus required style="max-width: 12rem;"/>
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+            <div class="actions">
+                <button type="submit">Activate MFA</button>
+                <a th:href="@{/account}"><button type="button" class="btn-quiet">Cancel</button></a>
+            </div>
+        </form>
+    </section>
+</main>
+
+</body>
+</html>

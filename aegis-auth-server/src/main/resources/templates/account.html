@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Aegis — Your account</title>
+    <link rel="stylesheet" th:href="@{/css/aegis.css}"/>
+</head>
+<body class="admin">
+
+<header th:replace="~{fragments/ui :: topbar('/ account')}"></header>
+
+<main class="page page-narrow">
+    <h1>Your account</h1>
+    <p class="sub">Identity and sign-in security for this Aegis account.</p>
+
+    <div class="msg ok" th:if="${mfaActivated}" role="status">
+        Two-factor authentication is now active — you'll be asked for a code at every sign-in.
+    </div>
+
+    <section class="panel">
+        <h2>Identity</h2>
+        <div class="kv"><span>Username</span><b th:text="${username}">admin</b></div>
+        <div class="kv"><span>Roles</span>
+            <span><span class="chip" th:each="r : ${roles}" th:text="${r}" style="margin-right:.35rem;">USER</span></span>
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>Two-factor authentication</h2>
+
+        <div th:if="${mfaEnabled}">
+            <p class="panel-text"><span class="chip chip-ok">ENABLED</span>
+                Sign-in requires a one-time code from your authenticator app.</p>
+            <form method="post" th:action="@{/account/mfa/enroll}" class="actions">
+                <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                <button type="submit" class="btn-quiet">Re-enroll with a new secret</button>
+            </form>
+        </div>
+
+        <div th:if="${!mfaEnabled and mfaPending}">
+            <p class="panel-text"><span class="chip chip-warn">PENDING</span>
+                A secret was generated but never confirmed — MFA is <b>not</b> protecting
+                this account yet.</p>
+            <div class="actions">
+                <a th:href="@{/account/mfa}"><button type="button">Continue setup</button></a>
+                <form method="post" th:action="@{/account/mfa/enroll}">
+                    <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                    <button type="submit" class="btn-quiet">Start over with a new secret</button>
+                </form>
+            </div>
+        </div>
+
+        <div th:if="${!mfaEnabled and !mfaPending}">
+            <p class="panel-text"><span class="chip">OFF</span>
+                Add a second factor so a stolen password alone can't sign in.</p>
+            <form method="post" th:action="@{/account/mfa/enroll}" class="actions">
+                <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                <button type="submit">Enable two-factor authentication</button>
+            </form>
+        </div>
+    </section>
+</main>
+
+</body>
+</html>
