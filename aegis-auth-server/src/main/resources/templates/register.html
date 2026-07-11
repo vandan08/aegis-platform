@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Aegis — Create account</title>
+    <link rel="stylesheet" th:href="@{/css/aegis.css}"/>
+</head>
+<body class="split">
+
+<aside th:replace="~{fragments/ui :: brand}"></aside>
+
+<main class="auth">
+    <div class="card">
+        <div th:replace="~{fragments/ui :: mini-logo}"></div>
+
+        <h1>Create account</h1>
+        <p class="sub">One identity for everything behind the gateway</p>
+
+        <div class="msg error" th:if="${error}" th:text="${error}" role="alert"></div>
+
+        <form method="post" th:action="@{/register}">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" autocomplete="username"
+                   maxlength="100" th:value="${username}" autofocus required/>
+
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="new-password"
+                   th:minlength="${minPasswordLength}" required/>
+            <div class="hint" th:text="'At least ' + ${minPasswordLength} + ' characters, with a letter and a digit.'"></div>
+
+            <label for="confirmPassword">Confirm password</label>
+            <input type="password" id="confirmPassword" name="confirmPassword"
+                   autocomplete="new-password" required/>
+
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+            <button type="submit" class="btn-block">Create account</button>
+        </form>
+
+        <p class="switch">Already have an account? <a th:href="@{/login}">Sign in</a></p>
+    </div>
+</main>
+
+</body>
+</html>

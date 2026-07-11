@@ -4,197 +4,22 @@
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
     <title>Aegis — Sign in</title>
-    <!-- Self-contained on purpose: no CDN fonts/scripts (CSP-friendly, works offline). -->
-    <style>
-        :root {
-            --bg: #0b1120;
-            --panel: #0f172a;
-            --card: rgba(30, 41, 59, .55);
-            --border: rgba(148, 163, 184, .15);
-            --text: #e2e8f0;
-            --muted: #94a3b8;
-            --faint: #64748b;
-            --accent: #6366f1;
-            --accent-2: #22d3ee;
-            --ok-bg: #14532d; --ok-fg: #bbf7d0;
-            --err-bg: #7f1d1d; --err-fg: #fecaca;
-        }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0; min-height: 100vh; display: flex;
-            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-            background: var(--bg); color: var(--text);
-        }
-
-        /* ---------- Left: brand panel (the product story at first sight) ---------- */
-        .brand {
-            position: relative; overflow: hidden; flex: 1.15;
-            display: flex; flex-direction: column; justify-content: center;
-            padding: 4rem 5rem; background: var(--panel);
-        }
-        /* Aurora glow — pure CSS, subtle motion */
-        .brand::before, .brand::after {
-            content: ""; position: absolute; border-radius: 50%; filter: blur(90px); opacity: .35;
-            animation: drift 18s ease-in-out infinite alternate;
-        }
-        .brand::before { width: 480px; height: 480px; background: var(--accent); top: -120px; left: -100px; }
-        .brand::after  { width: 420px; height: 420px; background: var(--accent-2); bottom: -140px; right: -80px;
-                         animation-delay: -9s; }
-        @keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(60px,40px) scale(1.15); } }
-        @media (prefers-reduced-motion: reduce) { .brand::before, .brand::after { animation: none; } }
-
-        .brand > * { position: relative; z-index: 1; }
-        .logo { display: flex; align-items: center; gap: .8rem; margin-bottom: 2.5rem; }
-        .logo svg { width: 44px; height: 44px; }
-        .logo span { font-size: 1.5rem; font-weight: 700; letter-spacing: .12em; }
-
-        .brand h2 {
-            font-size: 2.3rem; line-height: 1.2; margin: 0 0 1rem; font-weight: 700;
-            background: linear-gradient(90deg, #e2e8f0, #a5b4fc 55%, #67e8f9);
-            -webkit-background-clip: text; background-clip: text; color: transparent;
-        }
-        .brand p.tag { color: var(--muted); font-size: 1.02rem; max-width: 34rem; margin: 0 0 2.5rem; line-height: 1.6; }
-
-        .feature { display: flex; gap: .9rem; align-items: flex-start; max-width: 30rem; margin-bottom: 1.4rem; }
-        .feature .ic {
-            flex: none; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
-            background: rgba(99, 102, 241, .12); border: 1px solid rgba(99, 102, 241, .35);
-        }
-        .feature .ic svg { width: 20px; height: 20px; stroke: #a5b4fc; }
-        .feature b { display: block; font-size: .92rem; margin-bottom: .15rem; }
-        .feature small { color: var(--faint); font-size: .8rem; line-height: 1.45; }
-
-        /* ---------- Right: sign-in ---------- */
-        .auth {
-            flex: 1; display: flex; align-items: center; justify-content: center;
-            padding: 2.5rem 1.5rem; background:
-                radial-gradient(ellipse 60% 45% at 50% 0%, rgba(99,102,241,.08), transparent), var(--bg);
-        }
-        .card {
-            width: 380px; max-width: 100%; padding: 2.4rem 2.2rem;
-            background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-            backdrop-filter: blur(12px); box-shadow: 0 20px 50px rgba(0,0,0,.45);
-        }
-        .card h1 { font-size: 1.3rem; margin: 0 0 .35rem; }
-        .card .sub { color: var(--faint); font-size: .84rem; margin: 0 0 1.6rem; }
-
-        label { display: block; font-size: .78rem; font-weight: 600; letter-spacing: .02em;
-                margin: 1rem 0 .35rem; color: var(--muted); }
-        input {
-            width: 100%; padding: .65rem .8rem; font-size: .95rem;
-            border-radius: 9px; border: 1px solid #334155; background: #0b1120; color: var(--text);
-            transition: border-color .15s, box-shadow .15s;
-        }
-        input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.25); }
-        .hint { font-size: .72rem; color: var(--faint); margin-top: .3rem; }
-
-        button {
-            width: 100%; margin-top: 1.5rem; padding: .72rem; font-size: .95rem; font-weight: 600;
-            border: 0; border-radius: 9px; color: #fff; cursor: pointer;
-            background: linear-gradient(135deg, var(--accent), #4f46e5);
-            transition: transform .12s, box-shadow .12s;
-        }
-        button:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(99,102,241,.35); }
-        button:active { transform: translateY(0); }
-        button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
-
-        .msg { font-size: .82rem; padding: .55rem .75rem; border-radius: 8px; margin-bottom: 1.1rem; }
-        .error { background: var(--err-bg); color: var(--err-fg); }
-        .ok { background: var(--ok-bg); color: var(--ok-fg); }
-
-        .dev {
-            margin-top: 1.6rem; padding: .6rem .75rem; border-radius: 8px; font-size: .72rem;
-            color: var(--faint); border: 1px dashed rgba(148,163,184,.25); line-height: 1.5;
-        }
-        .dev code { color: var(--muted); background: rgba(148,163,184,.1); padding: .05rem .3rem; border-radius: 4px; }
-        .dev .pill { display: inline-block; font-weight: 700; letter-spacing: .08em; font-size: .62rem;
-                     color: #fbbf24; margin-right: .35rem; }
-
-        /* ---------- Responsive: collapse the brand panel on small screens ---------- */
-        .mini-logo { display: none; }
-        @media (max-width: 900px) {
-            .brand { display: none; }
-            .mini-logo { display: flex; align-items: center; gap: .6rem; justify-content: center; margin-bottom: 1.4rem; }
-            .mini-logo svg { width: 34px; height: 34px; }
-            .mini-logo span { font-weight: 700; letter-spacing: .12em; }
-        }
-    </style>
+    <link rel="stylesheet" th:href="@{/css/aegis.css}"/>
 </head>
-<body>
+<body class="split">
 
-<!-- ============ Brand panel: what Aegis is, before you even sign in ============ -->
-<aside class="brand" aria-hidden="true">
-    <div class="logo">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <defs>
-                <linearGradient id="g" x1="0" y1="0" x2="24" y2="24">
-                    <stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#22d3ee"/>
-                </linearGradient>
-            </defs>
-            <path d="M12 2 4 5.5V11c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5.5L12 2Z"
-                  stroke="url(#g)" stroke-width="1.6" stroke-linejoin="round"/>
-            <path d="m8.7 11.8 2.3 2.4 4.5-4.7" stroke="url(#g)" stroke-width="1.6"
-                  stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>AEGIS</span>
-    </div>
+<aside th:replace="~{fragments/ui :: brand}"></aside>
 
-    <h2>Trust nothing.<br/>Verify everything.</h2>
-    <p class="tag">
-        A zero-trust identity &amp; access platform: every request carries a short-lived signed
-        token, verified at every hop, and authorized by policy — not by network position.
-    </p>
-
-    <div class="feature">
-        <div class="ic">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>
-            </svg>
-        </div>
-        <div><b>Verified at every hop</b>
-            <small>Short-lived RS256 JWTs checked at the gateway and again inside each service — a bypassed edge grants nothing.</small>
-        </div>
-    </div>
-    <div class="feature">
-        <div class="ic">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 12h6M9 8h6M9 16h4"/><path d="M5 4h14v16H5z" rx="2"/>
-            </svg>
-        </div>
-        <div><b>Authorization as code</b>
-            <small>Fine-grained RBAC + ABAC decided by an OPA policy engine — versioned, tested, and failing closed.</small>
-        </div>
-    </div>
-    <div class="feature">
-        <div class="ic">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>
-            </svg>
-        </div>
-        <div><b>Hardened by default</b>
-            <small>TOTP MFA, rotating signing keys, account lockout, mTLS service identity, and a full audit trail.</small>
-        </div>
-    </div>
-</aside>
-
-<!-- ============ Sign-in ============ -->
 <main class="auth">
     <div class="card">
-        <div class="mini-logo">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M12 2 4 5.5V11c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5.5L12 2Z"
-                      stroke="#818cf8" stroke-width="1.6" stroke-linejoin="round"/>
-                <path d="m8.7 11.8 2.3 2.4 4.5-4.7" stroke="#22d3ee" stroke-width="1.6"
-                      stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span>AEGIS</span>
-        </div>
+        <div th:replace="~{fragments/ui :: mini-logo}"></div>
 
         <h1>Sign in</h1>
         <p class="sub">Continue to the Aegis identity platform</p>
 
         <div class="msg error" th:if="${param.error}" role="alert">Invalid credentials or one-time code.</div>
         <div class="msg ok" th:if="${param.logout}" role="status">You have been signed out.</div>
+        <div class="msg ok" th:if="${param.registered}" role="status">Account created — sign in to continue.</div>
 
         <form method="post" th:action="@{/login}">
             <label for="username">Username</label>
@@ -209,13 +34,14 @@
             <div class="hint">Only required if MFA is enabled on your account.</div>
 
             <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
-            <button type="submit">Sign in securely</button>
+            <button type="submit" class="btn-block">Sign in securely</button>
         </form>
+
+        <p class="switch">New here? <a th:href="@{/register}">Create an account</a></p>
 
         <!-- Demo hint for reviewers — remove outside local dev (docs/ROADMAP.md). -->
         <div class="dev">
             <span class="pill">DEV</span>Demo account: <code>admin</code> / <code>changeit</code>.
-            New here? <code>POST /api/register</code> creates an account.
         </div>
     </div>
 </main>

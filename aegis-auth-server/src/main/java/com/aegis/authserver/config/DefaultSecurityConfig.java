@@ -17,7 +17,8 @@ import org.springframework.security.web.SecurityFilterChain;
 
 /**
  * Security for everything that is NOT an authorization-server protocol endpoint:
- * the login page, self-service registration, and MFA enrollment.
+ * the login page, self-service registration (JSON + HTML), MFA enrollment, and the
+ * admin pages/APIs (ROLE_ADMIN).
  *
  * <p><b>Phase 2:</b> users are loaded from Postgres ({@code JpaUserDetailsService}) and
  * authenticated by {@link MfaAuthenticationProvider}, which layers a TOTP second factor
@@ -37,8 +38,8 @@ public class DefaultSecurityConfig {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**", "/actuator/prometheus", "/actuator/info",
-                                "/api/register", "/login", "/error").permitAll()
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                                "/api/register", "/register", "/login", "/error", "/css/**").permitAll()
+                        .requestMatchers("/api/admin/**", "/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 // MFA enrollment + registration are JSON APIs, not browser form posts.
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))

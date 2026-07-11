@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Aegis — Audit trail</title>
+    <link rel="stylesheet" th:href="@{/css/aegis.css}"/>
+</head>
+<body class="admin">
+
+<header th:replace="~{fragments/ui :: topbar('/ admin / audit trail')}"></header>
+
+<main class="page">
+    <h1>Audit trail</h1>
+    <p class="sub">
+        Every security-relevant event, SHA-256 hash-chained to the one before it — rewriting,
+        deleting, or reordering any row breaks every hash after it. Verification re-walks the
+        whole chain from genesis and is itself recorded on the chain.
+    </p>
+
+    <!-- Integrity banner: result of the last verification this page ran, or a prompt. -->
+    <div th:if="${verification == null}" class="banner">
+        <span class="dot" style="background: var(--faint);"></span>
+        <span>Chain integrity not checked yet in this view.</span>
+        <span class="spacer"></span>
+        <form method="post" th:action="@{/admin/audit/verify}">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+            <button type="submit">Verify chain integrity</button>
+        </form>
+    </div>
+
+    <div th:if="${verification != null and verification.intact()}" class="banner intact" role="status">
+        <span class="dot"></span>
+        <div>
+            <b>Chain intact</b> — <span th:text="${verification.verifiedEvents()}">0</span> events verified<span
+                th:if="${verification.legacyEvents() > 0}">,
+                <span th:text="${verification.legacyEvents()}">0</span> legacy (pre-chain) rows</span>.
+            <div class="meta">head <span class="hash" th:text="${verification.headHash()}"></span></div>
+        </div>
+        <span class="spacer"></span>
+        <form method="post" th:action="@{/admin/audit/verify}">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+            <button type="submit" class="btn-quiet">Re-verify</button>
+        </form>
+    </div>
+
+    <div th:if="${verification != null and !verification.intact()}" class="banner broken" role="alert">
+        <span class="dot"></span>
+        <div>
+            <b>Chain broken</b> — <span th:text="${verification.reason()}">reason</span><span
+                th:if="${verification.firstBrokenEventId() != null}">
+                (first broken event id <span th:text="${verification.firstBrokenEventId()}">?</span>, highlighted below)</span>.
+            <div class="meta"><span th:text="${verification.verifiedEvents()}">0</span> events verified before the break
+                · head <span class="hash" th:text="${verification.headHash()}"></span></div>
+        </div>
+        <span class="spacer"></span>
+        <form method="post" th:action="@{/admin/audit/verify}">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+            <button type="submit" class="btn-quiet">Re-verify</button>
+        </form>
+    </div>
+
+    <div class="table-wrap">
+        <table th:unless="${#lists.isEmpty(events)}">
+            <thead>
+            <tr>
+                <th>#</th><th>When (UTC)</th><th>Event</th><th>Principal</th>
+                <th>Detail</th><th>IP</th><th>Entry hash</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="e : ${events}"
+                th:classappend="${verification != null and verification.firstBrokenEventId() == e.id()} ? 'broken-row'">
+                <td th:text="${e.id()}">1</td>
+                <td class="time" th:text="${e.time()}">2026-07-07 10:15:30</td>
+                <td><span class="chip" th:attr="data-type=${e.type()}" th:text="${e.type()}">LOGIN_SUCCESS</span></td>
+                <td th:text="${e.principal()} ?: '—'">admin</td>
+                <td class="detail" th:text="${e.detail()} ?: ''" th:title="${e.detail()}">detail</td>
+                <td th:text="${e.remoteIp()} ?: '—'">127.0.0.1</td>
+                <td><span th:if="${e.hashPrefix() != null}" class="hash"
+                          th:text="${e.hashPrefix()} + '…'" th:title="${e.hashFull()}">a1b2c3…</span>
+                    <span th:if="${e.hashPrefix() == null}" class="hash legacy">pre-chain</span></td>
+            </tr>
+            </tbody>
+        </table>
+        <div th:if="${#lists.isEmpty(events)}" class="empty">
+            No audit events yet — they will appear here as logins, registrations, and key rotations happen.
+        </div>
+    </div>
+    <p class="sub" style="margin-top: .8rem;">Showing the 50 most recent events, newest first.</p>
+</main>
+
+</body>
+</html>

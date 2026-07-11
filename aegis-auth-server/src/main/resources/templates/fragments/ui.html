@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--
+  Shared UI fragments for the auth server's pages (login, register, admin).
+  Styles live in /css/aegis.css so every page draws from one design system.
+-->
+<body>
+
+<!-- Shield mark, reused everywhere the brand appears. -->
+<svg th:fragment="shield" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="24" y2="24">
+            <stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#22d3ee"/>
+        </linearGradient>
+    </defs>
+    <path d="M12 2 4 5.5V11c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5.5L12 2Z"
+          stroke="url(#g)" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="m8.7 11.8 2.3 2.4 4.5-4.7" stroke="url(#g)" stroke-width="1.6"
+          stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+
+<!-- Compact logo shown on the card when the brand panel collapses (small screens). -->
+<div th:fragment="mini-logo" class="mini-logo">
+    <svg th:replace="~{fragments/ui :: shield}"/>
+    <span>AEGIS</span>
+</div>
+
+<!-- Signed-in page header: brand, breadcrumb, sign-out. -->
+<header th:fragment="topbar(crumb)" class="topbar">
+    <svg th:replace="~{fragments/ui :: shield}"/>
+    <span class="name">AEGIS</span>
+    <span class="crumb" th:text="${crumb}">/ page</span>
+    <span class="spacer"></span>
+    <form method="post" th:action="@{/logout}">
+        <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+        <button type="submit" class="btn-quiet">Sign out</button>
+    </form>
+</header>
+
+<!-- ============ Brand panel: what Aegis is, before you even sign in ============ -->
+<aside th:fragment="brand" class="brand" aria-hidden="true">
+    <div class="logo">
+        <svg th:replace="~{fragments/ui :: shield}"/>
+        <span>AEGIS</span>
+    </div>
+
+    <h2>Trust nothing.<br/>Verify everything.</h2>
+    <p class="tag">
+        A zero-trust identity &amp; access platform: every request carries a short-lived signed
+        token, verified at every hop, and authorized by policy — not by network position.
+    </p>
+
+    <div class="feature">
+        <div class="ic">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+            </svg>
+        </div>
+        <div><b>Verified at every hop</b>
+            <small>Short-lived RS256 JWTs checked at the gateway and again inside each service — a bypassed edge grants nothing.</small>
+        </div>
+    </div>
+    <div class="feature">
+        <div class="ic">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 12h6M9 8h6M9 16h4"/><path d="M5 4h14v16H5z" rx="2"/>
+            </svg>
+        </div>
+        <div><b>Authorization as code</b>
+            <small>Fine-grained RBAC + ABAC decided by an OPA policy engine — versioned, tested, and failing closed.</small>
+        </div>
+    </div>
+    <div class="feature">
+        <div class="ic">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>
+            </svg>
+        </div>
+        <div><b>Hardened by default</b>
+            <small>TOTP MFA, rotating signing keys, account lockout, mTLS service identity, and a tamper-evident audit trail.</small>
+        </div>
+    </div>
+</aside>
+
+</body>
+</html>
