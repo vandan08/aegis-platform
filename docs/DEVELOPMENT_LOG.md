@@ -5,7 +5,104 @@ Format: date · what changed · why · anything the next session needs to know.
 
 ---
 
-## 2026-07-07 (later) — Finish Phase 5 + Phase 6 polish
+## 2026-07-07 (night) — Account page + browser MFA enrollment with QR code
+**What:** Completed the self-service story: register → sign in → enroll MFA from the browser.
+- **`MfaEnrollmentService`** extracted from `MfaController` (same pattern as registration):
+  the JSON API (`/api/mfa/**`) and the new pages share one path, so the two-step rule
+  (secret stored *disabled*, MFA on only after a code verifies — no locking yourself out)
+  and the `MFA_ENROLLED` audit apply identically. API responses unchanged.
+- **`/account`** (`AccountPageController` + `account.html`): identity panel (username, role
+  chips) + MFA status (ENABLED / PENDING / OFF chips) with enable / continue-setup /
+  re-enroll actions.
+- **`/account/mfa`** (`account-mfa.html`): scannable **QR code** of the `otpauth://` URI +
+  manual secret fallback + activation form (inline error on a wrong code, flash success on
+  activation). QR via **zxing:core** (encoding only, zero transitive deps — TOTP stays
+  hand-rolled since it's the showcased mechanic; QR is just presentation) rendered by
+  `QrSvgRenderer` as inline SVG (one path, module-unit viewBox, white backing for scanner
+  contrast, no imaging stack).
+- Topbar extracted to a parameterized fragment (`fragments/ui :: topbar(crumb)`) — admin
+  and account pages share it. New CSS: `.panel`, `.kv`, `.qr-box`, `.chip-ok/.chip-warn`.
+- **Tests (40/40 green, no Docker):** `MfaEnrollmentServiceTest` (5 — pending-not-active,
+  valid/wrong code, activate-without-enroll, re-enroll resets), `QrSvgRendererTest` (3 —
+  well-formed SVG, deterministic, quiet zone respected), `UiPagesRenderTest` +5 (account
+  states, QR page, wrong-code error, auth required). Preview dumps extended
+  (`account-mfa-off/on/setup.html`); QR verified in-browser: viewBox 49×49 (version 4 +
+  quiet zone), 837 modules, aria-labeled.
+
+**Why:** MFA existed but was unusable by humans (hand-copying a Base32 secret out of a JSON
+response). A scan-and-confirm flow makes the security feature real — and demoable.
+
+**Note:** error strings avoid apostrophes — Thymeleaf escapes `'` to `&#39;`, which broke a
+content assertion ("didn't" → "didn&#39;t").
+
+## 2026-07-07 (evening) — UI: registration page + admin audit-trail console
+**What:** Turned the auth server's web UI from a single login page into a small product:
+- **Design system extracted:** the login page's inline styles moved to `static/css/aegis.css`
+  and the brand panel/logo into Thymeleaf fragments (`templates/fragments/ui.html`); login,
+  registration, and admin pages now share one look (still zero JS / zero CDN).
+- **`GET|POST /register`** (`RegistrationPageController` + `register.html`): browser-facing
+  sibling of the JSON `POST /api/register` — same `RegistrationService`, so password policy,
+  uniqueness, and auditing are identical. Confirm-password + inline errors; success redirects
+  to `/login?registered`. Login page now links to it (dev hint no longer tells humans to curl).
+- **`GET /admin/audit`** (`AuditTrailPageController` + `admin/audit.html`): admin console for
+  the hash-chained audit trail — 50 newest events (colored type chips, truncated hashes,
+  legacy rows marked "pre-chain") and a **Verify chain integrity** button (POST, because it
+  appends `AUDIT_CHAIN_VERIFIED` to the chain it checks) with intact/broken banner; the first
+  broken row is highlighted. Head hash shown for external anchoring.
+- **Security config:** `/register` + `/css/**` allow-listed; `/admin/**` now requires
+  ROLE_ADMIN alongside `/api/admin/**`.
+- **Tests:** `UiPagesRenderTest` (@WebMvcTest, 10 tests) renders every page through the real
+  Thymeleaf view layer — no DB/Docker — and pins access rules (anon → login redirect,
+  non-admin → 403). `UiPreviewDumpTest` writes rendered pages to `target/ui-preview/` for
+  visual review (serve statically via `.claude/launch.json` → `ui-preview`). Suite: 26/26 green.
+
+**Boot 4.x gotchas found (add to the pile):** `@WebMvcTest` moved to
+`org.springframework.boot.webmvc.test.autoconfigure` (new `spring-boot-starter-webmvc-test`
+dependency); the slice no longer auto-includes security auto-config —
+`ServletWebSecurityAutoConfiguration`/`SecurityFilterAutoConfiguration` (module
+`spring-boot-security`) must be imported explicitly, and `spring-boot-security-test` is needed
+for `@WithMockUser`/`csrf()` to apply to auto-configured MockMvc.
+
+**Why:** First impressions and demoability: registration completes the self-service story, and
+the audit console makes the tamper-evident chain *visible* — a security feature nobody can see
+is a security feature that doesn't demo.
+
+## 2026-07-07 (later still) — Tamper-evident audit log (hash chain)
+**What:** Made the `auth_audit_event` trail *cryptographically* tamper-evident instead of
+append-only-by-convention (chosen from a brainstorm of Phase-6+ value adds — beat out DPoP,
+token exchange, and an admin dashboard because it's unique, security-deep, and fully verifiable
+without Docker on this machine).
+- **Migration V6:** `prev_hash`/`entry_hash` columns on `auth_audit_event` + single-row
+  `audit_chain_head` anchor table (seeded at a 64-zero genesis hash).
+- **`AuditHashChain`:** canonical SHA-256 encoding — domain-separation prefix, length-prefixed
+  UTF-8 fields (no field-boundary ambiguity), null ≠ empty, timestamp as epoch second + nanos.
+  `AuthAuditEvent.occurredAt` is now truncated to **microseconds** so the hashed value survives
+  the Postgres `TIMESTAMPTZ` round-trip (nanos would silently break re-verification).
+- **`AuditService`:** each append locks `audit_chain_head` (`SELECT … FOR UPDATE` via
+  `@Lock(PESSIMISTIC_WRITE)`), hashes the event against the head's last hash, inserts, advances
+  the head. Serializing appends is a deliberate trade — auth events are low-volume and the chain
+  can never fork.
+- **`AuditChainVerifier`** + **`GET /api/admin/audit/verify`** (ROLE_ADMIN, covered by the
+  existing `/api/admin/**` rule): re-walks the chain from genesis in id order, recomputes every
+  hash, checks the head anchor. Detects row rewrite, mid-chain deletion, tail truncation, and
+  unhashed-row injection; pre-V6 rows are reported as `legacyEvents`. Each verification is itself
+  audited (`AUDIT_CHAIN_VERIFIED`).
+- **Tests (no Docker needed):** `AuditHashChainTest` (4 — determinism, boundary ambiguity,
+  null-vs-empty, every-field-matters) and `AuditChainTamperTest` (7 — simulates direct-DB attacks
+  against an in-memory table: UPDATE, DELETE mid-chain, tail truncation, forged insert, legacy
+  tolerance). Auth-server suite 16/16 green on JDK 24.
+
+**Why:** The entity Javadoc *claimed* tamper evidence but anyone with DB access could silently
+rewrite history — a real STRIDE Tampering/Repudiation gap now closed, and a memorable
+"certificate-transparency-style log, no blockchain required" interview talking point.
+
+**Honest residual risk (also in THREAT_MODEL):** an attacker who rewrites the head row *and* the
+tail rows consistently can truncate undetected. Fix is exporting the head hash to an external
+anchor (log pipeline / another store) — the verify endpoint returns it for exactly that purpose.
+
+**Next session:** the Testcontainers ITs exercise the new append path against real Postgres in CI —
+watch that run. Optional follow-ups: scheduled verification with a Prometheus gauge; log the head
+hash periodically as a free external anchor.
 **What:**
 - **Helm chart** `deploy/helm/aegis`: a templated `workloads.yaml` loops the three services into
   Deployments + ClusterIP Services (DRY), a shared `ConfigMap` (issuer/OTLP/backing-service env) +

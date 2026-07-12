@@ -96,6 +96,21 @@ Goal: move from "authenticated?" to "allowed to do *this*?".
 > `*IntegrationTest` classes (Testcontainers Postgres) — the ones skipped in local dev here.
 
 ## Phase 6 — Polish & storytelling (what actually lands interviews) (in progress)
+- [x] **Tamper-evident audit log**: SHA-256 hash chain over `auth_audit_event` (migration V6,
+      `AuditHashChain`/`AuditService` append under a locked `audit_chain_head` anchor;
+      `AuditChainVerifier` + admin `GET /api/admin/audit/verify`). Detects row rewrite, deletion,
+      reordering, injection, and tail truncation — proven by `AuditChainTamperTest`.
+      Follow-up: export the head hash to an external anchor (logs / second store).
+- [x] **Web UI**: shared design system (`static/css/aegis.css` + `templates/fragments/ui.html`),
+      self-service **registration page** (`/register`, same service/policy/audit as the JSON API),
+      and an **admin audit-trail console** (`/admin/audit`: newest events, type chips, one-click
+      chain verification with intact/broken banner). Rendered + access-tested headlessly by
+      `UiPagesRenderTest`; visual previews via `UiPreviewDumpTest` → `target/ui-preview/`.
+- [x] **Account self-service + browser MFA enrollment**: `/account` (identity + MFA status)
+      and `/account/mfa` (QR-code TOTP setup, manual-secret fallback, confirm-code activation).
+      Shared `MfaEnrollmentService` behind both the pages and `/api/mfa/**` keeps the
+      two-step activation rule and audit identical (`MfaEnrollmentServiceTest`,
+      `QrSvgRendererTest`, `UiPagesRenderTest`).
 - [x] Architecture diagram (Mermaid in `ARCHITECTURE.md`) + design rationale ("Key security decisions")
 - [x] Threat model kept current; a "how I'd attack this" red-team narrative (`THREAT_MODEL.md`)
 - [x] Demo script (`docs/DEMO.md`) — ~5-min end-to-end walkthrough

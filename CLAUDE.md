@@ -92,6 +92,25 @@ Java-25-only syntax). The auth-server integration test needs Docker (Testcontain
 
 **Done (Phase 6 so far):** Mermaid system diagram (`ARCHITECTURE.md`), "how I'd attack this"
 red-team narrative (`THREAT_MODEL.md`), demo script (`docs/DEMO.md`), README badges/quickstart.
+- **Tamper-evident audit log:** `auth_audit_event` is SHA-256 **hash-chained** (migration V6:
+  `prev_hash`/`entry_hash` + single-row `audit_chain_head` anchor). Appends lock the head
+  (pessimistic write — the chain can't fork); `occurredAt` truncated to micros so hashes survive
+  the TIMESTAMPTZ round-trip. `GET /api/admin/audit/verify` (ROLE_ADMIN) re-walks the chain,
+  reports the first broken row, and is itself audited. Rewrite / mid-chain delete / reorder /
+  inject / tail truncation all detected — `AuditChainTamperTest` + `AuditHashChainTest` (no
+  Docker needed). Follow-up: anchor the head hash externally (logs / second store).
+- **Web UI (shared design system):** styles extracted to `static/css/aegis.css` + brand fragments
+  (`templates/fragments/ui.html`); **`/register`** page (HTML sibling of `POST /api/register`,
+  same service → same policy/audit) and **`/admin/audit`** console (50 newest events, colored
+  type chips, one-click chain verification with intact/broken banner + first-broken-row
+  highlight). `/admin/**` requires ROLE_ADMIN. `UiPagesRenderTest` renders every page via
+  @WebMvcTest — **Boot 4.x moved the slice** to `spring-boot-starter-webmvc-test` and security
+  auto-config must be imported explicitly (+ `spring-boot-security-test` for `@WithMockUser`).
+  `UiPreviewDumpTest` dumps rendered HTML to `target/ui-preview/` for visual review.
+- **Account page + browser MFA enrollment:** **`/account`** (identity, role chips, MFA status)
+  and **`/account/mfa`** (QR code of the `otpauth://` URI via zxing:core → inline SVG in
+  `QrSvgRenderer`, manual-secret fallback, activation form). Shared `MfaEnrollmentService`
+  backs both the pages and `/api/mfa/**`, preserving the two-step activation rule + audit.
 **Remaining:** live cloud deploy + recording; hardening follow-ups (signing key → Vault transit,
 Vault AppRole auth, mTLS for JWKS/datastore links) — all designed & documented, need infra to ship.
 
@@ -148,7 +167,10 @@ demo `/api/demo/whoami`; docker-compose; docs; Maven wrapper; one integration te
 (use the configurer + `http.with(...)`); Boot 4.1 ships **Jackson 3** (`tools.jackson`), so Spring
 Security's Jackson2 serialization needs an explicit `com.fasterxml.jackson.core:jackson-databind`
 dependency; Boot manages Testcontainers only via `${testcontainers.version}` (no default — pinned
-in the parent POM).
+in the parent POM); `@WebMvcTest` moved to `org.springframework.boot.webmvc.test.autoconfigure`
+(dep `spring-boot-starter-webmvc-test`) and no longer auto-includes security auto-config — import
+`ServletWebSecurityAutoConfiguration`/`SecurityFilterAutoConfiguration` explicitly and add
+`spring-boot-security-test` for `@WithMockUser`/`csrf()` support.
 
 **Known shortcuts still intentional (tracked in ROADMAP):**
 - Demo creds `admin` / `changeit`; service-client secret `service-secret`; cert/Vault dev

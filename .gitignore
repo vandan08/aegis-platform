@@ -28,3 +28,6 @@ certs/
 # Logs
 *.log
 logs/
+
+# Local IDE / agent tooling config (harness-specific, not project source)
+.claude/

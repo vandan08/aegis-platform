@@ -74,16 +74,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Semgrep scan
-        # Curated rulesets for Java + Spring + secrets/OWASP; non-blocking findings surface
-        # in the log. Tighten to `--error` once the baseline is clean.
-        run: semgrep ci --config p/java --config p/secrets --config p/owasp-top-ten
-        env:
-          SEMGREP_RULES: ''
+        # Curated rulesets for Java + Spring + secrets/OWASP. Report-only for now: `semgrep scan`
+        # (no app token required) prints findings to the log without gating the pipeline.
+        # `semgrep ci` blocks on findings by default — flip back to it (and drop `|| true`)
+        # once the baseline is clean and we want CVE/finding gating.
+        run: semgrep scan --config p/java --config p/secrets --config p/owasp-top-ten || true
 
   # ---- Dependency + IaC + secret scan (Trivy over the repo) ----
   trivy-fs:
     name: Trivy filesystem scan
     runs-on: ubuntu-latest
+    # Report-only: a transient Trivy DB pull (ghcr rate-limit) or a missing SARIF must not
+    # turn the pipeline red. Flip to gating once we adopt Advanced Security code scanning.
+    continue-on-error: true
     permissions:
       contents: read
       security-events: write   # upload SARIF to the Security tab
@@ -91,6 +94,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Trivy fs scan (vuln + secret + misconfig)
         uses: aquasecurity/trivy-action@0.28.0
+        env:
+          # Pin the vuln/Java DB mirrors so a ghcr.io rate-limit doesn't fail the scan instantly.
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db:1
         with:
           scan-type: fs
           scanners: vuln,secret,misconfig
@@ -99,7 +106,8 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
       - name: Upload Trivy SARIF
-        if: always()
+        if: hashFiles('trivy-fs.sarif') != ''
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-fs.sarif

@@ -14,8 +14,8 @@ it shows you think like an attacker, not just a feature builder.
 | Threat | Example | Mitigation (current / planned) |
 |---|---|---|
 | **S**poofing | Attacker forges a token | RS256 signatures; services validate against JWKS; `alg=none` rejected by Spring Security (proven in `TokenSecurityTest`); mTLS proves *workload* identity gateway↔service |
-| **T**ampering | Modify claims (e.g. elevate scope) | Signature covers all claims; any change invalidates it |
-| **R**epudiation | User denies an action | Append-only audit log of auth events (Phase 2); trace IDs (Phase 4) |
+| **T**ampering | Modify claims (e.g. elevate scope); rewrite audit history via DB access | Signature covers all claims; any change invalidates it. Audit rows are **SHA-256 hash-chained** (Phase 6) — rewriting/deleting/reordering any row breaks every hash after it (`AuditChainVerifier`, `GET /api/admin/audit/verify`) |
+| **R**epudiation | User denies an action; admin scrubs the trail | Append-only, **hash-chained** audit log of auth events (Phase 2 + 6); trace IDs (Phase 4) |
 | **I**nformation disclosure | Token/secret leakage in logs | Never log tokens/secrets; short TTLs; secrets from env/Vault (Phase 4); TLS everywhere (Phase 4) |
 | **D**enial of service | Flood the gateway | Redis rate limiting (now); per-client limits + circuit breakers (Phase 4) |
 | **E**levation of privilege | Use a low-priv token for admin action | Least-privilege scopes; fine-grained authz at the PDP (Phase 3); re-validate at each service |
@@ -61,10 +61,18 @@ Thinking like the adversary, and where each move dies:
    the path) and a circuit breaker keep one caller from starving the rest.
 7. **Poison the supply chain / exploit a known CVE.** CI runs Semgrep (SAST), Trivy (deps, secrets,
    images), and publishes an SBOM per service, so a vulnerable dependency is visible and gated.
+8. **Cover my tracks** — I got DB access, so I `UPDATE`/`DELETE` the audit rows that show my logins.
+   Every audit event is SHA-256-linked to the one before it (certificate-transparency style), and a
+   locked single-row head anchors the tail: rewriting, deleting, reordering, or injecting rows makes
+   `GET /api/admin/audit/verify` name the first broken row (proven in `AuditChainTamperTest`).
+   *Remaining move:* rewrite the head row **and** every row after my cut consistently — detectable
+   only if the head hash is anchored externally, which is why the verify endpoint returns it
+   (export it to the log pipeline / a second store; tracked as a follow-up).
 
 **Where I'd keep pushing (known gaps):** the JWT signing key is still PEM-in-Postgres (a DB compromise
-is game over until it moves to Vault transit/KMS); Vault itself runs dev-mode token auth; and JWKS /
-datastore links aren't mTLS yet. These are tracked below and in the roadmap.
+is game over until it moves to Vault transit/KMS); Vault itself runs dev-mode token auth; JWKS /
+datastore links aren't mTLS yet; and the audit-chain head hash isn't externally anchored. These are
+tracked below and in the roadmap.
 
 ## Supply-chain & pipeline (Phase 5)
 - **SBOM** (CycloneDX) generated per module on every build and published as a CI artifact.
