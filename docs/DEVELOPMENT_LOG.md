@@ -5,6 +5,20 @@ Format: date · what changed · why · anything the next session needs to know.
 
 ---
 
+## 2026-07-14 — Technology stack reference guide (docs/TECH_STACK.md)
+**What:** New `docs/TECH_STACK.md` — a study/interview-prep reference covering every technology in
+the platform: what it is, where it's used in this repo, why it was chosen, its USP, and the
+alternatives considered. Includes a one-page decision map (tech → module → one-line why) and a
+"why not X?" cheat sheet (Keycloak, Nginx/Kong, sessions vs JWT, `@PreAuthorize` vs OPA, reactive
+vs servlet). Contents verified against the actual module POMs, not just memory.
+
+**Why:** The developer asked for a single document to build understanding of which technology is
+used where and why — CLAUDE.md tracks *status*, ARCHITECTURE.md tracks *structure*; this fills the
+*rationale* gap and doubles as interview prep.
+
+**Next session:** keep TECH_STACK.md's decision map in sync when dependencies change (same rule as
+CLAUDE.md's status section). No code changes this session.
+
 ## 2026-07-07 (night) — Account page + browser MFA enrollment with QR code
 **What:** Completed the self-service story: register → sign in → enroll MFA from the browser.
 - **`MfaEnrollmentService`** extracted from `MfaController` (same pattern as registration):
