@@ -1,13 +1,21 @@
 package com.aegis.authserver.client;
 
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 
 import org.springframework.security.jackson2.SecurityJackson2Modules;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
@@ -39,6 +47,38 @@ public class JpaRegisteredClientRepository implements RegisteredClientRepository
         ClassLoader classLoader = JpaRegisteredClientRepository.class.getClassLoader();
         this.objectMapper.registerModules(SecurityJackson2Modules.getModules(classLoader));
         this.objectMapper.registerModule(new OAuth2AuthorizationServerJackson2Module());
+        this.objectMapper.registerModule(durationModule());
+    }
+
+    /**
+     * Teaches the mapper to read {@link Duration} back out of the settings maps.
+     *
+     * <p>{@code TokenSettings} is full of Durations (token TTLs). Jackson can <em>write</em> one
+     * without help — it reads the public {@code getSeconds()}/{@code getNano()} getters — but
+     * reading it back means writing {@code Duration}'s private final fields reflectively, and
+     * {@code java.base} does not open {@code java.time} to the classpath. On JDK 16+ that throws
+     * {@code InaccessibleObjectException}, so startup fails the moment a client is loaded from the
+     * database rather than seeded into it — i.e. on every restart after the first, which is exactly
+     * the path integration tests miss because Testcontainers always starts on an empty schema.
+     *
+     * <p>Deserializing from the two accessor values sidesteps reflection entirely and keeps the
+     * stored JSON shape ({@code {"seconds":300,"nano":0}}) unchanged, so rows written by earlier
+     * builds still load. Unknown properties — including the {@code @class} type id that default
+     * typing writes — are ignored by reading the two fields by name.
+     */
+    private static SimpleModule durationModule() {
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(Duration.class, new JsonDeserializer<Duration>() {
+            @Override
+            public Duration deserialize(JsonParser parser, DeserializationContext context)
+                    throws IOException {
+                JsonNode node = parser.readValueAsTree();
+                long seconds = node.path("seconds").asLong();
+                long nano = node.path("nano").asLong();
+                return Duration.ofSeconds(seconds, nano);
+            }
+        });
+        return module;
     }
 
     @Override
@@ -93,7 +133,12 @@ public class JpaRegisteredClientRepository implements RegisteredClientRepository
         Client entity = new Client();
         entity.setId(registeredClient.getId());
         entity.setClientId(registeredClient.getClientId());
-        entity.setClientIdIssuedAt(registeredClient.getClientIdIssuedAt());
+        // clientIdIssuedAt is optional on RegisteredClient but NOT NULL in the schema — a builder
+        // that never set it would otherwise null out the entity default and fail the insert.
+        // Registration time is "now" for any client we are seeing for the first time.
+        entity.setClientIdIssuedAt(registeredClient.getClientIdIssuedAt() != null
+                ? registeredClient.getClientIdIssuedAt()
+                : Instant.now());
         entity.setClientSecret(registeredClient.getClientSecret());
         entity.setClientSecretExpiresAt(registeredClient.getClientSecretExpiresAt());
         entity.setClientName(registeredClient.getClientName());
