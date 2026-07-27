@@ -57,7 +57,15 @@
             <version>2.19.2</version>
         </dependency>
 
-        <!-- Schema migrations -->
+        <!-- Schema migrations. Boot 4.x split spring-boot-autoconfigure into per-technology
+             modules: flyway-core alone is just the library, and `spring.flyway.*` stays inert
+             without spring-boot-flyway (which carries the auto-configuration). Symptom if it is
+             missing: migrations never run and Hibernate's `ddl-auto: validate` fails startup
+             with "Schema validation: missing table [app_user]". -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
