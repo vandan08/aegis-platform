@@ -47,7 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * (custom login page, /admin/** needs ROLE_ADMIN, CSRF on).
  */
 @WebMvcTest(controllers = {LoginController.class, RegistrationPageController.class,
-        AuditTrailPageController.class, AccountPageController.class})
+        AuditTrailPageController.class, AccountPageController.class, HomeController.class})
 // Boot 4.x split security auto-config into the spring-boot-security module, and the
 // @WebMvcTest slice no longer pulls it in — import it explicitly so the test filter
 // chain (and the CSRF request attribute the templates render) exists.
@@ -244,6 +244,15 @@ class UiPagesRenderTest {
         when(mfaEnrollment.activate("alice", "222222")).thenReturn(true);
 
         mvc.perform(post("/account/mfa/activate").with(csrf()).param("code", "222222"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/account"));
+    }
+
+    @Test
+    @WithMockUser(username = "alice")
+    @DisplayName("the site root sends signed-in users to their account page, not a 404")
+    void rootRedirectsToAccount() throws Exception {
+        mvc.perform(get("/"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/account"));
     }
