@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.http.HttpStatus;
@@ -89,6 +90,43 @@ class PolicyEnforcementFilterTest {
         filter(input -> Mono.just(false)).filter(authenticatedExchange(), chain).block();
 
         assertThat(forwarded).isTrue();
+    }
+
+    @Test
+    @DisplayName("a denial says what was evaluated, without leaking the token or the ruleset")
+    void denialBodyExplainsTheDecision() {
+        MockServerWebExchange exchange = authenticatedExchange();
+
+        filter(input -> Mono.just(false)).filter(exchange, chain -> Mono.empty())
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(jwtAuth()))
+                .block();
+
+        String body = exchange.getResponse().getBodyAsString().block();
+        assertThat(body).contains("\"error\":\"access_denied\"")
+                .contains("\"subject\":\"alice\"")
+                .contains("\"scopes\":[\"demo.read\"]")
+                .contains("\"action\":\"GET\"")
+                .contains("\"path\":\"/api/demo/whoami\"");
+        // The token itself must never appear in an error the caller can screenshot or forward.
+        assertThat(body).doesNotContain("token");
+        assertThat(exchange.getResponse().getHeaders()
+                .getFirst(PolicyEnforcementFilter.DECISION_HEADER)).isEqualTo("deny");
+    }
+
+    @Test
+    @DisplayName("an allowed request is stamped with the policy decision too")
+    void allowedRequestCarriesDecisionHeader() {
+        MockServerWebExchange exchange = authenticatedExchange();
+
+        filter(input -> Mono.just(true)).filter(exchange, ex -> Mono.empty())
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(jwtAuth()))
+                .block();
+        // The header is registered as a beforeCommit action so it survives proxying, so it
+        // only materializes once the response actually commits.
+        exchange.getResponse().setComplete().block();
+
+        assertThat(exchange.getResponse().getHeaders()
+                .getFirst(PolicyEnforcementFilter.DECISION_HEADER)).isEqualTo("allow");
     }
 
     private PolicyEnforcementFilter filter(PolicyDecisionPoint pdp) {
