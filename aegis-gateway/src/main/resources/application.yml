@@ -1,5 +1,7 @@
 server:
-  port: 8080
+  # PORT is what most container platforms (Render, Fly, Cloud Run, Heroku) inject to tell
+  # the process which port to bind. Defaulting to 8080 keeps the documented local setup.
+  port: ${PORT:8080}
 
 spring:
   application:
@@ -7,26 +9,23 @@ spring:
 
   data:
     redis:
-      host: localhost
-      port: 6379
+      # A single URL rather than host/port: managed Redis is handed over as one
+      # `rediss://user:password@host:port` string, and splitting it into parts would
+      # drop the credentials and the TLS scheme.
+      url: ${REDIS_URL:redis://localhost:6379}
 
   security:
     oauth2:
       resourceserver:
         jwt:
           # Gateway discovers the JWKS from the auth server and validates every token.
-          issuer-uri: http://localhost:9000
+          # Discovery is lazy (Boot wraps this in a SupplierJwtDecoder), so the gateway
+          # still starts when the auth server is cold — it resolves on the first token.
+          issuer-uri: ${AEGIS_ISSUER_URI:http://localhost:9000}
 
-# Fine-grained authorization (Phase 3): the gateway asks OPA (the Policy Decision
-# Point) to allow/deny each authenticated request. Fail-closed on any PDP error.
-aegis:
-  authz:
-    opa:
-      enabled: true
-      url: http://localhost:8181
-      decision-path: /v1/data/aegis/authz/allow
-      timeout: 500ms
-
+  # NOTE: this block must stay under `spring:`. It was briefly indented under `aegis:`,
+  # which is silently inert — the properties bind to nothing, the gateway starts happily
+  # with an empty route table, and every proxied path 404s.
   cloud:
     gateway:
       server:
@@ -34,7 +33,7 @@ aegis:
           routes:
             - id: resource-demo
               # Plain HTTP in dev; the mtls profile flips this to https (see below).
-              uri: ${aegis.routes.resource-demo-uri:http://localhost:8081}
+              uri: ${aegis.routes.resource-demo-uri}
               predicates:
                 - Path=/api/demo/**
               filters:
@@ -53,6 +52,51 @@ aegis:
                   args:
                     name: resourceDemoCircuitBreaker
                     fallbackUri: forward:/fallback/resource-demo
+
+            # The profile API the ABAC ownership rule governs. Same downstream, same
+            # limiter and breaker — the difference is purely which policy rule applies,
+            # which is the point: enforcement is uniform, authorization is per-resource.
+            - id: user-profile
+              uri: ${aegis.routes.resource-demo-uri}
+              predicates:
+                - Path=/api/users/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: 10
+                    redis-rate-limiter.burstCapacity: 20
+                    key-resolver: "#{@principalOrClientKeyResolver}"
+                - name: CircuitBreaker
+                  args:
+                    name: resourceDemoCircuitBreaker
+                    fallbackUri: forward:/fallback/resource-demo
+
+# Fine-grained authorization (Phase 3): the gateway asks OPA (the Policy Decision
+# Point) to allow/deny each authenticated request. Fail-closed on any PDP error.
+aegis:
+  authz:
+    opa:
+      enabled: ${AEGIS_OPA_ENABLED:true}
+      url: ${AEGIS_OPA_URL:http://localhost:8181}
+      decision-path: /v1/data/aegis/authz/allow
+      timeout: ${AEGIS_OPA_TIMEOUT:500ms}
+
+  # Where the gateway proxies the demo API. Overridden by the `mtls` profile (https) and
+  # by AEGIS_RESOURCE_DEMO_URI in deployed environments.
+  routes:
+    resource-demo-uri: ${AEGIS_RESOURCE_DEMO_URI:http://localhost:8081}
+
+  # The interactive demo console served at the gateway root (static/index.html). It drives a
+  # real Authorization Code + PKCE login and then fires real requests through this gateway,
+  # so what a visitor sees is the live enforcement path, not a mock.
+  playground:
+    enabled: ${AEGIS_PLAYGROUND_ENABLED:true}
+    issuer-uri: ${AEGIS_ISSUER_URI:http://localhost:9000}
+    client-id: ${AEGIS_WEB_CLIENT_ID:aegis-web-client}
+    scopes: openid,profile,demo.read,demo.write
+    # Shown on the page so anyone can try the sandbox. DEV/DEMO ONLY - see docs/ROADMAP.md.
+    demo-user: ${AEGIS_DEMO_USER:alice}
+    demo-password: ${AEGIS_DEMO_PASSWORD:aegis-demo-2026}
 
 # Resilience4j (Phase 4) — tuning for the downstream circuit breaker + its time limiter.
 resilience4j:
@@ -106,6 +150,23 @@ logging:
   structured:
     format:
       console: ecs
+
+---
+# Managed-cloud profile: the deployed demo runs without an OTLP collector, so tracing export
+# is switched off rather than left retrying a dead endpoint every span. Activate as `cloud,prod`.
+spring:
+  config:
+    activate:
+      on-profile: cloud
+management:
+  tracing:
+    enabled: false
+server:
+  # Behind a TLS-terminating proxy (Caddy, Render's edge, an ingress controller) the app
+  # itself speaks plain HTTP. Without honouring X-Forwarded-*, Spring builds redirects and
+  # absolute URLs as http://internal-host:port — which for an authorization server means the
+  # login redirect bounces the browser out of HTTPS and OAuth2 flows break.
+  forward-headers-strategy: framework
 
 ---
 # mTLS profile (Phase 4): service identity between gateway and downstream services.
