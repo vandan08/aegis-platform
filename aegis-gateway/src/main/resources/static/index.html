@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Aegis — Zero-Trust Console</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png"/>
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png"/>
+<link rel="preload" as="image" href="/assets/img/hero-bg.png"/>
+<!--
+  The Aegis demo console.
+
+  Everything on this page is real. It performs an actual OAuth2 Authorization Code + PKCE
+  login against the Aegis auth server, then fires actual HTTP requests through this gateway
+  — the same edge that authenticates the token, asks the OPA policy engine for a decision,
+  and rate-limits per caller identity. Nothing is mocked or replayed; if a scenario shows
+  403, the policy engine really refused it a few milliseconds ago.
+
+  No build step, no framework, no CDN: one static file the gateway serves at "/", which is
+  also the registered OAuth2 redirect URI.
+-->
+<style>
+:root{
+  --bg:#070b14; --panel:#0b1120; --card:rgba(23,33,54,.62); --border:rgba(148,163,184,.15);
+  --text:#e2e8f0; --muted:#94a3b8; --faint:#64748b; --accent:#6366f1; --accent-2:#22d3ee;
+  --ok-bg:#14532d; --ok-fg:#bbf7d0; --err-bg:#7f1d1d; --err-fg:#fecaca;
+  --warn-bg:#78350f; --warn-fg:#fde68a; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);
+     font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;
+     display:flex;flex-direction:column}
+/* One artwork behind the whole document. Fixed, so it holds still while the console
+   scrolls over it; `cover` keeps it filling any viewport without distortion. */
+body::before{content:"";position:fixed;inset:0;z-index:-2;
+  background:var(--bg) url("/assets/img/hero-bg.png") center 30% / cover no-repeat}
+body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:linear-gradient(180deg,rgba(4,7,14,.28) 0%,rgba(4,7,14,.5) 100%)}
+@media(max-width:860px){body::before{background-position:60% 30%}}
+a{color:#a5b4fc}
+.wrap{max-width:1180px;margin:0 auto;padding:0 1.25rem 4rem}
+html{scroll-behavior:smooth}
+.sr-img{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
+/* The console rides on a sheet of dark glass. Enough opacity for body copy and
+   monospace payloads to stay readable; enough translucency that the valley is
+   still visibly underneath, so the page reads as one image end to end. */
+.console{position:relative;flex:1 0 auto;
+  background:linear-gradient(180deg,rgba(7,11,20,.55) 0,rgba(7,11,20,.9) 9rem,rgba(7,11,20,.93) 100%);
+  border-top:1px solid rgba(148,163,184,.12)}
+.console::before{content:"";position:absolute;left:0;right:0;top:-7rem;height:7rem;
+  pointer-events:none;background:linear-gradient(180deg,rgba(7,11,20,0),rgba(7,11,20,.55))}
+.console .wrap{padding-top:.5rem}
+
+/* ---------- hero ---------- */
+header{position:relative;min-height:100svh;flex:none;display:flex;flex-direction:column;
+  color:#f8fafc;isolation:isolate}
+/* The hero shows the artwork bare — only a left/top scrim so the nav and the
+   headline keep their contrast. The page ground itself lives on <body>. */
+header::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:
+    linear-gradient(90deg,rgba(4,7,14,.72) 0%,rgba(4,7,14,.34) 44%,rgba(4,7,14,0) 74%),
+    linear-gradient(180deg,rgba(4,7,14,.6) 0%,rgba(4,7,14,0) 26%)}
+
+/* nav */
+.nav{position:relative;z-index:2;display:flex;align-items:center;gap:2rem;
+     max-width:1180px;width:100%;margin:0 auto;padding:1.5rem 1.25rem}
+.logo{display:flex;align-items:center;gap:.7rem}
+.logo svg{width:26px;height:26px}
+.logo span{font-size:.95rem;font-weight:600;letter-spacing:.24em}
+.nav-links{display:flex;gap:1.75rem;margin-left:1.5rem}
+.nav-links a{font-size:.85rem;color:rgba(248,250,252,.78);text-decoration:none;transition:color .2s}
+.nav-links a:hover{color:#fff}
+.nav-cta{margin-left:auto;display:flex;align-items:center;gap:1.25rem}
+.nav-cta a{font-size:.85rem;color:rgba(248,250,252,.8);text-decoration:none}
+.nav-cta a:hover{color:#fff}
+.nav-cta a.outline{border:1px solid rgba(248,250,252,.45);border-radius:999px;
+  padding:.45rem 1.15rem;color:#fff;transition:background .2s,border-color .2s}
+.nav-cta a.outline:hover{background:rgba(248,250,252,.12);border-color:#fff}
+@media(max-width:880px){.nav-links{display:none}}
+
+/* headline block */
+.hero{position:relative;z-index:2;flex:1;display:flex;align-items:center;
+      max-width:1180px;width:100%;margin:0 auto;padding:2rem 1.25rem}
+h1{font-size:clamp(3rem,8vw,5.75rem);line-height:1;margin:0 0 .5rem;font-weight:400;
+   letter-spacing:-.02em;color:#fff;text-shadow:0 2px 40px rgba(4,7,14,.6)}
+.lede{font-size:clamp(1.35rem,3vw,2.1rem);font-weight:300;color:rgba(226,232,240,.72);
+      margin:0 0 2.25rem;max-width:30rem;line-height:1.2}
+.hero-cta{display:flex;align-items:center;gap:1.75rem;flex-wrap:wrap}
+.btn-hero{display:inline-block;border:1px solid rgba(248,250,252,.5);border-radius:999px;
+  padding:.8rem 1.9rem;font-size:.95rem;color:#fff;text-decoration:none;
+  background:rgba(248,250,252,.06);backdrop-filter:blur(6px);
+  transition:background .2s,border-color .2s,transform .2s}
+.btn-hero:hover{background:rgba(248,250,252,.16);border-color:#fff;transform:translateY(-1px)}
+.btn-plain{font-size:.95rem;color:rgba(248,250,252,.82);text-decoration:none}
+.btn-plain:hover{color:#fff}
+
+/* footer row of the hero */
+.hero-foot{position:relative;z-index:2;max-width:1180px;width:100%;margin:0 auto;
+  padding:0 1.25rem 2.25rem;display:grid;gap:1.25rem;align-items:end;
+  grid-template-columns:1fr minmax(0,24rem) 1fr}
+.hero-foot .fl{font-size:.8rem;color:rgba(226,232,240,.62)}
+.hero-foot .fc{font-size:.8rem;line-height:1.65;color:rgba(226,232,240,.78);margin:0}
+.hero-foot .fr{font-size:.8rem;color:rgba(226,232,240,.62);text-align:right;justify-self:end;
+  text-decoration:none}
+.hero-foot .fr:hover{color:#fff}
+@media(max-width:860px){.hero-foot{grid-template-columns:1fr}
+  .hero-foot .fr{text-align:left;justify-self:start}}
+
+.links{display:flex;flex-wrap:wrap;gap:.5rem}
+.pill{font-size:.78rem;padding:.35rem .75rem;border-radius:999px;text-decoration:none;
+      border:1px solid var(--border);background:rgba(148,163,184,.08);color:var(--muted)}
+.pill:hover{border-color:var(--accent);color:var(--text)}
+
+/* ---------- layout ---------- */
+h2{font-size:1.05rem;margin:2.5rem 0 .3rem;letter-spacing:.01em}
+h2 .step{color:var(--faint);font-weight:600;margin-right:.5rem}
+.sub{color:var(--faint);font-size:.85rem;margin:0 0 1rem;max-width:60rem}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.35rem;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+
+/* ---------- identity ---------- */
+.identity{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:1rem}
+@media(max-width:860px){.identity{grid-template-columns:1fr}}
+.creds{font-family:var(--mono);font-size:.85rem;background:rgba(3,6,14,.6);border:1px solid #1e293b;
+       border-radius:9px;padding:.7rem .9rem;margin:.85rem 0}
+.creds b{color:var(--accent-2);font-weight:600}
+button{font:inherit;font-weight:600;padding:.6rem 1.1rem;border-radius:9px;cursor:pointer;
+       border:1px solid transparent;background:linear-gradient(90deg,var(--accent),#8b5cf6);color:#fff}
+button:hover{filter:brightness(1.12)}
+button:disabled{opacity:.45;cursor:not-allowed;filter:none}
+button.ghost{background:transparent;border-color:#334155;color:var(--muted)}
+button.ghost:hover{border-color:var(--accent);color:var(--text)}
+.claims{font-family:var(--mono);font-size:.78rem;white-space:pre-wrap;word-break:break-all;
+        margin:0;color:#cbd5e1;max-height:15rem;overflow:auto}
+.kv{display:flex;gap:.6rem;font-size:.83rem;padding:.28rem 0;border-bottom:1px solid rgba(148,163,184,.08)}
+.kv:last-child{border-bottom:0}
+.kv b{color:var(--muted);font-weight:600;min-width:6.5rem}
+.kv span{font-family:var(--mono);color:#cbd5e1;word-break:break-all}
+.chip{display:inline-block;font-size:.7rem;font-family:var(--mono);padding:.12rem .5rem;
+      border-radius:5px;margin:0 .3rem .3rem 0;background:rgba(99,102,241,.16);
+      border:1px solid rgba(99,102,241,.4);color:#c7d2fe}
+
+/* ---------- scenarios ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:1rem}
+.sc{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem;
+    display:flex;flex-direction:column;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.sc h3{font-size:.95rem;margin:0 0 .35rem}
+.sc .req{font-family:var(--mono);font-size:.76rem;color:var(--accent-2);margin-bottom:.5rem;
+         word-break:break-all}
+.sc p{font-size:.81rem;color:var(--faint);margin:0 0 .9rem;flex:1}
+.sc .expect{font-size:.74rem;color:var(--muted);margin-bottom:.75rem}
+.result{margin-top:.85rem;font-size:.78rem;display:none}
+.result.show{display:block}
+.status{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem}
+.badge{font-family:var(--mono);font-size:.72rem;font-weight:700;padding:.16rem .55rem;border-radius:5px}
+.b-ok{background:var(--ok-bg);color:var(--ok-fg)}
+.b-err{background:var(--err-bg);color:var(--err-fg)}
+.b-warn{background:var(--warn-bg);color:var(--warn-fg)}
+.b-neutral{background:#1e293b;color:var(--muted)}
+pre.body{font-family:var(--mono);font-size:.72rem;background:rgba(3,6,14,.6);border:1px solid #1e293b;
+     border-radius:8px;padding:.6rem;margin:0;max-height:11rem;overflow:auto;white-space:pre-wrap;
+     word-break:break-word;color:#cbd5e1}
+.verdict{font-size:.76rem;margin-top:.5rem;padding:.45rem .6rem;border-radius:7px}
+.v-pass{background:rgba(20,83,45,.35);color:var(--ok-fg);border:1px solid rgba(34,197,94,.3)}
+.v-fail{background:rgba(127,29,29,.3);color:var(--err-fg);border:1px solid rgba(239,68,68,.3)}
+
+/* ---------- log ---------- */
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.76rem}
+th{text-align:left;color:var(--faint);font-weight:600;padding:.4rem .6rem;
+   border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(11,17,32,.94)}
+td{padding:.4rem .6rem;border-bottom:1px solid rgba(148,163,184,.07);color:#cbd5e1}
+.logwrap{max-height:20rem;overflow:auto}
+.empty{color:var(--faint);font-size:.83rem;padding:1rem .6rem}
+.note{font-size:.76rem;color:var(--faint);margin-top:1rem;border-left:2px solid #334155;padding-left:.8rem}
+.hidden{display:none !important}
+.banner{border-radius:10px;padding:.7rem .95rem;font-size:.83rem;margin-bottom:1rem}
+.banner.err{background:rgba(127,29,29,.35);border:1px solid rgba(239,68,68,.35);color:var(--err-fg)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="sr-img" role="img"
+       aria-label="A lone figure on a path through a moonlit valley beneath a galaxy-filled sky"></div>
+
+  <nav class="nav">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs><linearGradient id="g" x1="0" y1="0" x2="24" y2="24">
+          <stop offset="0" stop-color="#c7d2fe"/><stop offset="1" stop-color="#a5f3fc"/>
+        </linearGradient></defs>
+        <path d="M12 2 4 5.5V11c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5.5L12 2Z"
+              stroke="url(#g)" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="m8.7 11.8 2.3 2.4 4.5-4.7" stroke="url(#g)" stroke-width="1.6"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>AEGIS</span>
+    </div>
+    <div class="nav-links">
+      <a href="#identity">How It Works</a>
+      <a href="#probe">Scenarios</a>
+      <a id="link-audit" href="#">Audit Log</a>
+      <a id="link-jwks" href="#">JWKS</a>
+    </div>
+    <div class="nav-cta">
+      <a id="link-login" href="#">Sign In</a>
+      <a class="outline" id="link-account" href="#">Your Account</a>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <div>
+      <h1>Aegis</h1>
+      <p class="lede">Zero trust, proven live.</p>
+      <div class="hero-cta">
+        <a class="btn-hero" href="#identity">Begin the Passage</a>
+        <a class="btn-plain" href="#probe">See the Scenarios</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-foot">
+    <div class="fl">Every request is a stranger until proven otherwise.</div>
+    <p class="fc">
+      Aegis is a zero-trust identity and access platform. A real OAuth2 + PKCE login, a
+      policy-enforcing gateway, and a tamper-evident audit trail. Nothing mocked. Nothing replayed.
+    </p>
+    <a class="fr" href="#identity">[Scroll to Explore]</a>
+  </div>
+</header>
+
+<main class="console">
+<div class="wrap">
+  <div id="banner" class="banner err hidden"></div>
+
+  <!-- ============ 1. identity ============ -->
+  <h2 id="identity"><span class="step">01</span>Get an identity</h2>
+  <p class="sub">
+    The console is a public OAuth2 client, so it has no secret to hide behind. It uses PKCE:
+    a one-time verifier is generated in your browser, only its SHA-256 hash travels with the
+    authorization request, and the authorization code is worthless to anyone who cannot produce
+    the original verifier.
+  </p>
+
+  <div class="identity">
+    <div class="panel" id="signin-panel">
+      <div id="signed-out">
+        <p style="margin:0 0 .2rem;font-size:.9rem">You are not signed in.</p>
+        <p style="margin:.2rem 0 0;font-size:.81rem;color:var(--faint)">
+          Use the sandbox account below — a plain <code>USER</code>, deliberately not an admin, so the
+          policy rules actually bite.
+        </p>
+        <div class="creds">
+          user <b id="demo-user">…</b><br/>
+          pass <b id="demo-pass">…</b>
+        </div>
+        <button id="btn-signin">Sign in with Aegis</button>
+      </div>
+      <div id="signed-in" class="hidden">
+        <div class="kv"><b>Subject</b><span id="tk-sub">—</span></div>
+        <div class="kv"><b>Issuer</b><span id="tk-iss">—</span></div>
+        <div class="kv"><b>Algorithm</b><span id="tk-alg">—</span></div>
+        <div class="kv"><b>Signing key</b><span id="tk-kid">—</span></div>
+        <div class="kv"><b>Expires in</b><span id="tk-exp">—</span></div>
+        <div style="margin:.9rem 0 .2rem;font-size:.78rem;color:var(--muted)">Scopes</div>
+        <div id="tk-scopes"></div>
+        <div style="margin:.5rem 0 .2rem;font-size:.78rem;color:var(--muted)">Roles</div>
+        <div id="tk-roles"></div>
+        <button class="ghost" id="btn-signout" style="margin-top:1rem">Sign out</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:.5rem">
+        Decoded access token <span style="color:var(--faint)">(header + payload, verified by the gateway on every call)</span>
+      </div>
+      <pre class="claims" id="token-json">Sign in to mint a token.</pre>
+    </div>
+  </div>
+
+  <!-- ============ 2. scenarios ============ -->
+  <h2 id="probe"><span class="step">02</span>Probe the policy</h2>
+  <p class="sub">
+    Same token, same gateway, different resources — the outcomes differ because
+    <code>policies/authz.rego</code> says they should. UTC hour right now is
+    <b id="utc-hour">—</b>, which matters for the time-boxed write.
+  </p>
+  <div class="grid" id="scenarios"></div>
+
+  <!-- ============ 3. log ============ -->
+  <h2><span class="step">03</span>Request log</h2>
+  <p class="sub">Every call this page has made, newest first.</p>
+  <div class="panel" style="padding:.4rem">
+    <div class="logwrap">
+      <table>
+        <thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th>Policy</th><th>Latency</th></tr></thead>
+        <tbody id="log"></tbody>
+      </table>
+      <div class="empty" id="log-empty">No requests yet.</div>
+    </div>
+  </div>
+
+  <p class="note">
+    This page keeps the access token in <code>sessionStorage</code> so a refresh does not drop your
+    session mid-demo. A production single-page app should not: it would put the token in a
+    backend-for-frontend session instead, so no script on the page can read it. The trade-off is
+    deliberate and local to this console — nothing else in the platform stores a token in a browser.
+  </p>
+</div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var cfg = null;
+  var token = sessionStorage.getItem("aegis.token") || null;
+  var claims = null;
+  var header = null;
+
+  /* ---------------- helpers ---------------- */
+
+  function $(id) { return document.getElementById(id); }
+
+  function b64urlToBytes(s) {
+    s = s.replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) { s += "="; }
+    var raw = atob(s), out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) { out[i] = raw.charCodeAt(i); }
+    return out;
+  }
+
+  function bytesToB64url(bytes) {
+    var s = "";
+    for (var i = 0; i < bytes.length; i++) { s += String.fromCharCode(bytes[i]); }
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  // Decoding is not verifying. The browser reads these claims only to display them; the
+  // gateway independently checks the signature against the issuer's JWKS on every request,
+  // which is the check that actually matters.
+  function decodeSegment(segment) {
+    return JSON.parse(new TextDecoder().decode(b64urlToBytes(segment)));
+  }
+
+  function randomVerifier() {
+    var bytes = new Uint8Array(48);
+    crypto.getRandomValues(bytes);
+    return bytesToB64url(bytes);
+  }
+
+  function sha256Challenge(verifier) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))
+      .then(function (digest) { return bytesToB64url(new Uint8Array(digest)); });
+  }
+
+  function fail(message) {
+    var el = $("banner");
+    el.textContent = message;
+    el.classList.remove("hidden");
+  }
+
+  /* ---------------- OAuth2 Authorization Code + PKCE ---------------- */
+
+  function redirectUri() { return window.location.origin + "/"; }
+
+  function signIn() {
+    var verifier = randomVerifier();
+    var state = randomVerifier();
+    sessionStorage.setItem("aegis.verifier", verifier);
+    sessionStorage.setItem("aegis.state", state);
+    sha256Challenge(verifier).then(function (challenge) {
+      var q = new URLSearchParams({
+        response_type: "code",
+        client_id: cfg.clientId,
+        redirect_uri: redirectUri(),
+        scope: cfg.scopes.join(" "),
+        state: state,
+        code_challenge: challenge,
+        code_challenge_method: "S256"
+      });
+      window.location.href = cfg.issuerUri + "/oauth2/authorize?" + q.toString();
+    });
+  }
+
+  function exchangeCode(code, state) {
+    var expected = sessionStorage.getItem("aegis.state");
+    var verifier = sessionStorage.getItem("aegis.verifier");
+    sessionStorage.removeItem("aegis.state");
+    sessionStorage.removeItem("aegis.verifier");
+
+    // The state check is what makes the callback trustworthy: it proves this redirect answers
+    // an authorization request this page started, not one an attacker planted.
+    if (!expected || expected !== state) {
+      fail("Authorization state mismatch — the callback did not match the request this page started. Sign in again.");
+      return Promise.resolve();
+    }
+    var body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: code,
+      redirect_uri: redirectUri(),
+      client_id: cfg.clientId,
+      code_verifier: verifier
+    });
+    return fetch(cfg.issuerUri + "/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          throw new Error("Token exchange failed (" + res.status + "): " + t);
+        });
+      }
+      return res.json();
+    }).then(function (json) {
+      token = json.access_token;
+      sessionStorage.setItem("aegis.token", token);
+      renderIdentity();
+    }).catch(function (e) { fail(e.message); });
+  }
+
+  function signOut() {
+    token = null;
+    sessionStorage.removeItem("aegis.token");
+    renderIdentity();
+  }
+
+  /* ---------------- identity rendering ---------------- */
+
+  function renderIdentity() {
+    if (!token) {
+      claims = header = null;
+      $("signed-out").classList.remove("hidden");
+      $("signed-in").classList.add("hidden");
+      $("token-json").textContent = "Sign in to mint a token.";
+      renderScenarios();
+      return;
+    }
+    var parts = token.split(".");
+    try {
+      header = decodeSegment(parts[0]);
+      claims = decodeSegment(parts[1]);
+    } catch (e) {
+      fail("Could not decode the access token; signing out.");
+      signOut();
+      return;
+    }
+    $("signed-out").classList.add("hidden");
+    $("signed-in").classList.remove("hidden");
+    $("tk-sub").textContent = claims.sub || "—";
+    $("tk-iss").textContent = claims.iss || "—";
+    $("tk-alg").textContent = header.alg || "—";
+    $("tk-kid").textContent = header.kid || "—";
+    $("tk-scopes").innerHTML = chips(scopeList());
+    $("tk-roles").innerHTML = chips(claims.roles || []);
+    $("token-json").textContent =
+      JSON.stringify({ header: header, payload: claims }, null, 2);
+    tickExpiry();
+    renderScenarios();
+  }
+
+  function scopeList() {
+    if (Array.isArray(claims.scope)) { return claims.scope; }
+    if (typeof claims.scope === "string") { return claims.scope.split(" "); }
+    return [];
+  }
+
+  function chips(values) {
+    if (!values || !values.length) { return '<span style="color:var(--faint);font-size:.8rem">none</span>'; }
+    return values.map(function (v) {
+      return '<span class="chip">' + escapeHtml(v) + "</span>";
+    }).join("");
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // Access tokens live five minutes by design; showing the countdown makes that concrete
+  // rather than a claim in a README.
+  function tickExpiry() {
+    if (!claims || !claims.exp) { return; }
+    var left = Math.floor(claims.exp - Date.now() / 1000);
+    var el = $("tk-exp");
+    if (!el) { return; }
+    if (left <= 0) {
+      el.textContent = "expired — sign in again";
+    } else {
+      el.textContent = Math.floor(left / 60) + "m " + (left % 60) + "s";
+    }
+  }
+  setInterval(tickExpiry, 1000);
+
+  /* ---------------- scenarios ---------------- */
+
+  var SCENARIOS = [
+    {
+      id: "read",
+      title: "Read the demo API",
+      method: "GET",
+      path: function () { return "/api/demo/whoami"; },
+      why: "Your token carries the demo.read scope, and the policy grants GET on /api/demo/** to anyone holding it. The request is proxied to the downstream service, which re-validates the same token before answering.",
+      expect: "Expected: 200 — identity survives the hop.",
+      pass: function (r) { return r.status === 200; }
+    },
+    {
+      id: "write",
+      title: "Write, inside a time window",
+      method: "POST",
+      path: function () { return "/api/demo/echo"; },
+      body: { note: "sent from the Aegis console" },
+      why: "Writes need the demo.write scope AND must land between 09:00 and 17:00 UTC. Outside that window the identical request is refused — an attribute of the request, not of the user, decides it.",
+      expect: "Expected: 200 during 09:00–17:00 UTC, otherwise 403.",
+      pass: function (r) {
+        var hour = new Date().getUTCHours();
+        return (hour >= 9 && hour < 17) ? r.status === 200 : r.status === 403;
+      }
+    },
+    {
+      id: "own",
+      title: "Read your own profile",
+      method: "GET",
+      path: function () { return "/api/users/" + (claims ? claims.sub : "unknown"); },
+      why: "The ownership rule compares the {id} path segment against the token subject. They match, so the gateway lets it through.",
+      expect: "Expected: 200 — you own this resource.",
+      pass: function (r) { return r.status === 200; }
+    },
+    {
+      id: "other",
+      title: "Read someone else's profile",
+      method: "GET",
+      path: function () { return "/api/users/mallory"; },
+      why: "Same valid token, same endpoint, different owner. The downstream service has no authorization logic at all — the refusal happens at the edge, so the request never reaches it.",
+      expect: "Expected: 403 — the policy engine refuses.",
+      pass: function (r) { return r.status === 403; }
+    },
+    {
+      id: "notoken",
+      title: "No token at all",
+      method: "GET",
+      path: function () { return "/api/demo/whoami"; },
+      noAuth: true,
+      why: "Zero trust means the network position grants nothing. An anonymous request to the same URL is rejected at authentication, before any policy is consulted.",
+      expect: "Expected: 401 — unauthenticated.",
+      pass: function (r) { return r.status === 401; }
+    },
+    {
+      id: "tampered",
+      title: "Tampered signature",
+      method: "GET",
+      path: function () { return "/api/demo/whoami"; },
+      tamper: true,
+      why: "Your real token with one character of its signature flipped. The gateway checks it against the issuer's published JWKS, so the forgery fails cryptographically — no allow-list or revocation lookup needed.",
+      expect: "Expected: 401 — signature does not verify.",
+      pass: function (r) { return r.status === 401; }
+    },
+    {
+      id: "flood",
+      title: "Burst 25 requests",
+      method: "GET",
+      path: function () { return "/api/demo/whoami"; },
+      flood: 25,
+      why: "The limiter buckets by caller identity (the token subject), not by route or IP, so one noisy client cannot spend everyone else's budget. Burst capacity is 20, refilling at 10/second.",
+      expect: "Expected: a mix of 200 and 429.",
+      pass: function (r) { return r.throttled > 0; }
+    }
+  ];
+
+  function renderScenarios() {
+    var host = $("scenarios");
+    if (host.childElementCount === 0) {
+      SCENARIOS.forEach(function (s) {
+        var card = document.createElement("div");
+        card.className = "sc";
+        card.innerHTML =
+          "<h3>" + escapeHtml(s.title) + "</h3>" +
+          '<div class="req" id="req-' + s.id + '"></div>' +
+          "<p>" + escapeHtml(s.why) + "</p>" +
+          '<div class="expect">' + escapeHtml(s.expect) + "</div>" +
+          '<div><button id="run-' + s.id + '">Run</button></div>' +
+          '<div class="result" id="res-' + s.id + '"></div>';
+        host.appendChild(card);
+        $("run-" + s.id).addEventListener("click", function () { run(s); });
+      });
+    }
+    SCENARIOS.forEach(function (s) {
+      $("req-" + s.id).textContent = s.method + " " + s.path();
+      // Every scenario needs a token except the anonymous one — that is its whole point.
+      $("run-" + s.id).disabled = !token && !s.noAuth;
+    });
+  }
+
+  function tamperedToken() {
+    var parts = token.split(".");
+    var sig = parts[2];
+    var swapped = sig[0] === "A" ? "B" : "A";
+    parts[2] = swapped + sig.slice(1);
+    return parts.join(".");
+  }
+
+  function run(s) {
+    var btn = $("run-" + s.id);
+    btn.disabled = true;
+    btn.textContent = "Running…";
+    var finish = function () { btn.textContent = "Run"; renderScenarios(); };
+    (s.flood ? runFlood(s) : runOnce(s))
+      .then(function (r) { showResult(s, r); })
+      .catch(function (e) { showError(s, e); })
+      .then(finish, finish);
+  }
+
+  function requestInit(s) {
+    var init = { method: s.method, headers: {} };
+    if (!s.noAuth) {
+      init.headers["Authorization"] = "Bearer " + (s.tamper ? tamperedToken() : token);
+    }
+    if (s.body) {
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(s.body);
+    }
+    return init;
+  }
+
+  function runOnce(s) {
+    var path = s.path();
+    var started = performance.now();
+    return fetch(path, requestInit(s)).then(function (res) {
+      var ms = Math.round(performance.now() - started);
+      return res.text().then(function (text) {
+        var result = {
+          status: res.status,
+          ms: ms,
+          decision: res.headers.get("X-Aegis-Policy-Decision"),
+          body: text,
+          method: s.method,
+          path: path
+        };
+        log(result);
+        return result;
+      });
+    });
+  }
+
+  // Fired in parallel on purpose: the limiter's burst capacity is only observable when
+  // requests overlap. Sequential calls would be refilled between each one and all succeed.
+  function runFlood(s) {
+    var path = s.path();
+    var started = performance.now();
+    var calls = [];
+    for (var i = 0; i < s.flood; i++) {
+      calls.push(fetch(path, requestInit(s)).then(function (r) { return r.status; }));
+    }
+    return Promise.all(calls).then(function (statuses) {
+      var ms = Math.round(performance.now() - started);
+      var ok = statuses.filter(function (x) { return x === 200; }).length;
+      var throttled = statuses.filter(function (x) { return x === 429; }).length;
+      var other = statuses.length - ok - throttled;
+      var result = {
+        status: throttled > 0 ? 429 : 200,
+        ms: ms,
+        decision: null,
+        throttled: throttled,
+        method: s.method,
+        path: path,
+        body: JSON.stringify({
+          sent: statuses.length, allowed: ok, rateLimited: throttled, other: other
+        }, null, 2)
+      };
+      log({ status: result.status, ms: ms, decision: null, method: s.method,
+            path: path + "  (×" + statuses.length + ")" });
+      return result;
+    });
+  }
+
+  function badgeClass(status) {
+    if (status >= 200 && status < 300) { return "b-ok"; }
+    if (status === 401 || status === 403) { return "b-err"; }
+    if (status === 429) { return "b-warn"; }
+    return "b-neutral";
+  }
+
+  function showResult(s, r) {
+    var el = $("res-" + s.id);
+    var passed = s.pass(r);
+    var decision = r.decision
+      ? '<span class="badge ' + (r.decision === "allow" ? "b-ok" : "b-err") + '">policy: ' + r.decision + "</span>"
+      : "";
+    el.innerHTML =
+      '<div class="status">' +
+        '<span class="badge ' + badgeClass(r.status) + '">' + r.status + "</span>" +
+        decision +
+        '<span class="badge b-neutral">' + r.ms + " ms</span>" +
+      "</div>" +
+      '<pre class="body">' + escapeHtml(prettify(r.body)) + "</pre>" +
+      '<div class="verdict ' + (passed ? "v-pass" : "v-fail") + '">' +
+        (passed ? "Matches the expected outcome." : "Did not match the expected outcome.") +
+      "</div>";
+    el.classList.add("show");
+  }
+
+  function showError(s, e) {
+    var el = $("res-" + s.id);
+    el.innerHTML = '<div class="status"><span class="badge b-err">error</span></div>' +
+      '<pre class="body">' + escapeHtml(e.message || String(e)) + "</pre>";
+    el.classList.add("show");
+  }
+
+  function prettify(text) {
+    if (!text) { return "(empty response body)"; }
+    try { return JSON.stringify(JSON.parse(text), null, 2); } catch (e) { return text; }
+  }
+
+  /* ---------------- request log ---------------- */
+
+  function log(r) {
+    $("log-empty").classList.add("hidden");
+    var row = document.createElement("tr");
+    var decision = r.decision
+      ? '<span class="badge ' + (r.decision === "allow" ? "b-ok" : "b-err") + '">' + r.decision + "</span>"
+      : '<span style="color:var(--faint)">—</span>';
+    row.innerHTML =
+      "<td>" + new Date().toLocaleTimeString() + "</td>" +
+      "<td>" + escapeHtml(r.method) + "</td>" +
+      "<td>" + escapeHtml(r.path) + "</td>" +
+      '<td><span class="badge ' + badgeClass(r.status) + '">' + r.status + "</span></td>" +
+      "<td>" + decision + "</td>" +
+      "<td>" + r.ms + " ms</td>";
+    var body = $("log");
+    body.insertBefore(row, body.firstChild);
+  }
+
+  /* ---------------- boot ---------------- */
+
+  function applyConfig() {
+    $("demo-user").textContent = cfg.demoUser || "(ask the operator)";
+    $("demo-pass").textContent = cfg.demoPassword || "(ask the operator)";
+    $("link-login").href = cfg.issuerUri + "/login";
+    $("link-account").href = cfg.issuerUri + "/account";
+    $("link-audit").href = cfg.issuerUri + "/admin/audit";
+    $("link-jwks").href = cfg.issuerUri + "/oauth2/jwks";
+    $("utc-hour").textContent = String(new Date().getUTCHours()).padStart(2, "0") + ":00 UTC";
+  }
+
+  fetch("/playground/config")
+    .then(function (res) {
+      if (!res.ok) { throw new Error("The demo console is disabled on this deployment."); }
+      return res.json();
+    })
+    .then(function (json) {
+      cfg = json;
+      applyConfig();
+      $("btn-signin").addEventListener("click", signIn);
+      $("btn-signout").addEventListener("click", signOut);
+
+      var params = new URLSearchParams(window.location.search);
+      if (params.get("error")) {
+        fail("Authorization failed: " + params.get("error") +
+             (params.get("error_description") ? " — " + params.get("error_description") : ""));
+        window.history.replaceState({}, "", window.location.pathname);
+        renderIdentity();
+        return;
+      }
+      if (params.get("code")) {
+        // Strip the code from the address bar as soon as it is read: an authorization code
+        // in browser history or a copy-pasted URL is a credential lying around.
+        var code = params.get("code"), state = params.get("state");
+        window.history.replaceState({}, "", window.location.pathname);
+        exchangeCode(code, state).then(renderIdentity);
+        return;
+      }
+      renderIdentity();
+    })
+    .catch(function (e) { fail(e.message); });
+})();
+</script>
+</body>
+</html>
