@@ -1,0 +1,131 @@
+# Render Blueprint — the whole Aegis platform from one git push.
+#
+# This is the managed-platform path: Render builds each Dockerfile, provisions Postgres and
+# a Key Value (Redis) store, and wires them together with the env vars below. See
+# docs/DEPLOYMENT.md for the alternative single-VM path and the trade-offs between them.
+#
+# Two things need a manual edit after the first deploy, because a blueprint cannot reference
+# a URL that does not exist until the services are created:
+#   AEGIS_ISSUER_URI  on all three services -> the auth server's real https URL
+#   AEGIS_CORS_ALLOWED_ORIGINS / AEGIS_WEB_CLIENT_REDIRECT_URIS -> the gateway's real URL
+# Both are marked `sync: false`, so Render prompts for them at deploy time instead.
+
+services:
+  # ---- authorization server (public: login, OIDC, admin console) -------------
+  - type: web
+    name: aegis-auth-server
+    runtime: docker
+    plan: free
+    dockerfilePath: ./aegis-auth-server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: cloud,prod
+      # Render supplies the database as separate parts; the app composes the JDBC URL from
+      # them (a blueprint cannot concatenate values, and Render's connectionString is a
+      # postgres:// URL, which the JDBC driver does not accept).
+      - key: DB_HOST
+        fromDatabase: { name: aegis-postgres, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: aegis-postgres, property: port }
+      - key: DB_NAME
+        fromDatabase: { name: aegis-postgres, property: database }
+      - key: DB_USERNAME
+        fromDatabase: { name: aegis-postgres, property: user }
+      - key: DB_PASSWORD
+        fromDatabase: { name: aegis-postgres, property: password }
+      # This server's own public URL. It is stamped into every token's `iss` claim, so it
+      # must match what clients actually reach — set it to https://aegis-auth-server.onrender.com
+      # (or your custom domain) on the first deploy.
+      - key: AEGIS_ISSUER_URI
+        sync: false
+      # The gateway's public URL — the origin allowed to POST to /oauth2/token, and the
+      # registered redirect target. The trailing slash on the redirect URI is significant.
+      - key: AEGIS_CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: AEGIS_WEB_CLIENT_REDIRECT_URIS
+        sync: false
+      - key: AEGIS_DEMO_USER
+        value: alice
+      - key: AEGIS_DEMO_PASSWORD
+        sync: false
+      # Postgres 18 rejects the legacy "Asia/Calcutta" alias some JVMs report.
+      - key: TZ
+        value: UTC
+
+  # ---- gateway (public: demo console + policy-enforced APIs) -----------------
+  - type: web
+    name: aegis-gateway
+    runtime: docker
+    plan: free
+    dockerfilePath: ./aegis-gateway/Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: cloud,prod
+      - key: AEGIS_ISSUER_URI
+        sync: false
+      # Internal service-to-service addresses. `fromService` resolves to the private host,
+      # so this traffic never leaves Render's network.
+      - key: AEGIS_RESOURCE_DEMO_URI
+        fromService: { name: aegis-resource-demo, type: web, property: hostport }
+      - key: AEGIS_OPA_URL
+        fromService: { name: aegis-opa, type: web, property: hostport }
+      - key: REDIS_URL
+        fromService: { name: aegis-keyvalue, type: keyvalue, property: connectionString }
+      - key: AEGIS_DEMO_USER
+        value: alice
+      - key: AEGIS_DEMO_PASSWORD
+        sync: false
+      - key: TZ
+        value: UTC
+
+  # ---- downstream service ----------------------------------------------------
+  # On paid plans this should be `type: pserv` (a private service with no public URL).
+  # Render's free tier has no private services, so it runs as a web service here — which
+  # is a fair demonstration in its own right: reached directly without a token it answers
+  # 401, because it validates the JWT itself rather than trusting the gateway.
+  - type: web
+    name: aegis-resource-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./aegis-resource-demo/Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: cloud,prod
+      - key: AEGIS_ISSUER_URI
+        sync: false
+      - key: TZ
+        value: UTC
+
+  # ---- policy decision point -------------------------------------------------
+  - type: web
+    name: aegis-opa
+    runtime: docker
+    plan: free
+    dockerfilePath: ./policies/Dockerfile
+    dockerContext: ./policies
+    healthCheckPath: /health
+    envVars:
+      # The OPA base image has no shell, so its listen port is fixed at 8181 in the
+      # Dockerfile. Telling Render the same number keeps its health check pointed correctly.
+      - key: PORT
+        value: 8181
+
+  # ---- rate-limiter store ----------------------------------------------------
+  # Render renamed its Redis product to "Key Value". Older blueprints used `type: redis`;
+  # if this key is rejected, that is the one line to change.
+  - type: keyvalue
+    name: aegis-keyvalue
+    plan: free
+    ipAllowList: []   # internal access only — no public connections
+
+databases:
+  - name: aegis-postgres
+    databaseName: aegis_auth
+    user: aegis
+    plan: free
