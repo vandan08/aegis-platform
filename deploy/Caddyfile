@@ -1,0 +1,43 @@
+# Caddy fronts the whole platform. It terminates TLS (certificates obtained and renewed
+# from Let's Encrypt automatically, no cron job and no certbot) and forwards to the two
+# services that are meant to be publicly reachable.
+#
+# Caddy sets X-Forwarded-Proto/Host on every proxied request, and both apps run with
+# `server.forward-headers-strategy: framework` under the `cloud` profile, so Spring builds
+# redirects and the OIDC discovery document with the public https URL rather than the
+# container's internal http address.
+
+{
+	email {$ACME_EMAIL}
+	# Security headers applied to everything, set once rather than per-site.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+# The authorization server: login, OIDC protocol endpoints, account + admin consoles.
+{$AEGIS_AUTH_HOST} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	reverse_proxy auth-server:9000
+}
+
+# The gateway: the demo console at / and the policy-enforced APIs behind it.
+{$AEGIS_APP_HOST} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		# The console is same-origin only; nothing here is meant to be framed.
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	reverse_proxy gateway:8080
+}
