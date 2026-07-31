@@ -14,6 +14,7 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -66,6 +67,20 @@ class WhoAmIControllerTest {
 
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
         assertThat(response.getBody()).contains("\"subject\":\"alice\"");
+    }
+
+    @Test
+    @DisplayName("the write endpoint records who wrote and echoes the payload")
+    void echoesPayloadForValidToken() {
+        String token = mintToken("alice");
+        ResponseEntity<String> response = client().post().uri("/api/demo/echo")
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .body("{\"note\":\"hello\"}")
+                .retrieve().toEntity(String.class);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).contains("\"writtenBy\":\"alice\"").contains("hello");
     }
 
     private static String mintToken(String subject) {

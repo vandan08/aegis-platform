@@ -1,5 +1,7 @@
 server:
-  port: 8081
+  # PORT is what most container platforms (Render, Fly, Cloud Run, Heroku) inject to tell
+  # the process which port to bind. Defaulting to 8081 keeps the documented local setup.
+  port: ${PORT:8081}
 
 spring:
   application:
@@ -8,7 +10,10 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:9000
+          # Every environment points at its own auth server; the token is still validated
+          # against that issuer's JWKS, so a token from anywhere else is rejected here even
+          # if it somehow got past the gateway.
+          issuer-uri: ${AEGIS_ISSUER_URI:http://localhost:9000}
 
 management:
   endpoints:
@@ -40,6 +45,24 @@ logging:
   structured:
     format:
       console: ecs
+
+---
+# Managed-cloud profile: the deployed demo runs without an OTLP collector, so tracing export
+# is switched off rather than left retrying a dead endpoint every span. Everything else
+# (metrics, health, structured logs via `prod`) is unchanged — activate as `cloud,prod`.
+spring:
+  config:
+    activate:
+      on-profile: cloud
+management:
+  tracing:
+    enabled: false
+server:
+  # Behind a TLS-terminating proxy (Caddy, Render's edge, an ingress controller) the app
+  # itself speaks plain HTTP. Without honouring X-Forwarded-*, Spring builds redirects and
+  # absolute URLs as http://internal-host:port — which for an authorization server means the
+  # login redirect bounces the browser out of HTTPS and OAuth2 flows break.
+  forward-headers-strategy: framework
 
 ---
 # mTLS profile (Phase 4): serve HTTPS and REQUIRE a client certificate signed by the
