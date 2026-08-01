@@ -5,6 +5,121 @@ Format: date · what changed · why · anything the next session needs to know.
 
 ---
 
+## 2026-08-29 — Interactive demo console + the platform becomes deployable
+**What:** Phase 6's two open items — something worth showing, and somewhere to show it.
+
+**The console (`aegis-gateway`, `static/index.html`, served at `/`).** A framework-free, CDN-free
+static page that drives a real Authorization Code + PKCE flow against the auth server and then
+fires real requests through the gateway. Seven scenarios: allowed read, time-windowed write, own
+profile, someone else's profile, no token, tampered signature, 25-request burst. Each shows status,
+latency, the policy decision header, and the response body, and states whether that matched the
+expectation. The decoded-token panel counts the 5-minute expiry down live.
+- `/` is mapped by an explicit `RouterFunction` rather than the static welcome-page handler,
+  because `/` is *also* the registered OAuth2 redirect URI: anything that answers it with a
+  redirect to `/index.html` drops the `?code=` query and strands the flow.
+- Config (`issuerUri`, `clientId`, scopes, sandbox creds) comes from `GET /playground/config`, so
+  one image runs unchanged in every environment.
+- The auth server now allows CORS on `/oauth2/**` for the console's origin — the code-for-token
+  exchange is a `fetch()` from a different origin, and without it the browser discards the
+  response before the page sees it. Credentials are deliberately not allowed (PKCE needs no cookie).
+
+**Two new endpoints** so the policy demo has real resources: `POST /api/demo/echo` (governed by the
+time-of-day rule) and `GET /api/users/{id}` (governed by the ownership rule), plus a `user-profile`
+route on the gateway. The Rego policy already covered both cases — **no policy change was needed**,
+which is the nice part: the rules were written against a resource model, not against endpoints.
+
+**The PEP now explains its refusals.** `PolicyEnforcementFilter` stamps
+`X-Aegis-Policy-Decision: allow|deny`, and a denial returns JSON naming the evaluated subject,
+roles, scopes, action, path and UTC hour. The header is registered via `beforeCommit` — set eagerly
+it does not survive proxying, because the routing filter copies the downstream headers over it.
+The body echoes only claims the caller already holds; never the token, never the ruleset.
+
+**Deployability.** Every URL, port and credential is env-driven now. New `cloud` profile on all
+three services turns OTLP export off (no collector out there; otherwise every span retries a dead
+endpoint) and sets `server.forward-headers-strategy: framework` — without that, an auth server
+behind a TLS-terminating proxy builds `http://internal-host:port` redirects and the OAuth2 flow
+breaks in a way that looks like a certificate problem. Shipped `deploy/compose.prod.yml` +
+`deploy/Caddyfile` (single VM, automatic Let's Encrypt) and `render.yaml`; `policies/Dockerfile`
+bakes the Rego into an immutable image so deployed authorization is as reviewable as the code.
+Guide in `docs/DEPLOYMENT.md`.
+
+**Bug found and fixed — this one would have sunk the live demo.** The gateway's
+`cloud.gateway.server.webflux.routes` block was indented under `aegis:` instead of `spring:`.
+Unknown YAML keys bind to nothing and nothing warns, so the gateway started perfectly with an
+**empty route table** and every proxied path returned 404. It had presumably been that way since
+the `aegis:` block was inserted between `spring:` and the routes. Now covered by
+`GatewayRouteConfigurationTest`, which asserts both routes bind, point at the resource service, and
+carry the rate limiter and circuit breaker. *Startup succeeding is not evidence that a gateway can
+route.*
+
+**`DataInitializer` seeding is now an upsert for the web client.** Redirect URIs come from config,
+and a deployment that moves to a new public URL must have the new URI registered — skipping the
+update whenever a row already existed would make the first deploy work and every later one fail.
+It reuses the existing primary key so `save()` updates in place. Accounts stay create-once (a
+password changed through the UI is never silently reset). Also seeds a **non-admin `alice`** for
+the sandbox: an admin is allowed everything by the first RBAC rule, so an admin session would sail
+through every scenario and never show a denial.
+
+**Verified live** against Postgres 18 + Redis 8 + the new OPA image, all three services running:
+- gateway routing restored (200 with `X-RateLimit-*` headers, proving the route proxies);
+- `X-Aegis-Policy-Decision: allow` on the happy path, `deny` + explanatory JSON on refusal;
+- ownership denial, missing-token 401, tampered-signature 401 all as expected;
+- the burst scenario: 25 sent → **20 allowed, 5 × 429**, exactly the configured burst capacity;
+- 9/9 Rego tests pass *inside* the built policy image; PDP allows alice's write at 13:00 UTC and
+  denies the identical request at 22:00;
+- auth server **restarted** against the existing database: the client round-trips through the
+  Duration deserializer and is re-registered in place — two boots, still exactly two client rows.
+
+**Not verified by me:** the interactive password step of the login form (I do not type credentials
+into forms). The token exchange was exercised with a token minted through the API instead. Worth
+30 seconds of manual confirmation before recording.
+
+**Test suite:** 18 gateway tests, 13 resource-demo, 44 auth-server non-Docker — all green. The two
+Testcontainers ITs still fail on this machine (Testcontainers cannot reach the Docker Desktop named
+pipe even though the CLI can); unchanged from before, and they run on CI.
+
+**Next session:** run `docs/DEPLOYMENT.md` path A, put the real URL in the README's Live demo
+section (currently `#`), change the seeded `admin`/`changeit` password before linking publicly,
+then record `docs/DEMO.md` Script A.
+
+## 2026-08-16 — First live run of the auth server: two startup blockers fixed
+**What:** Ran the auth server against a real Postgres 18 for the first time outside Testcontainers
+and walked all five UI pages in a browser. Startup failed twice; both were real defects, not
+environment noise:
+- **Flyway never ran.** Boot 4.x split `spring-boot-autoconfigure` into per-technology modules, so
+  `flyway-core` on its own is just the library — `spring.flyway.*` stays inert without
+  **`org.springframework.boot:spring-boot-flyway`**, which carries the auto-configuration and is
+  not a transitive dependency of flyway-core. Symptom: no Flyway log lines at all, then Hibernate's
+  `ddl-auto: validate` aborts with `Schema validation: missing table [app_user]`. Added the module
+  to `aegis-auth-server/pom.xml`; migrations V1–V6 now apply (7 tables created).
+- **Client seeding violated a NOT NULL constraint.** `JpaRegisteredClientRepository.toEntity()`
+  copied `RegisteredClient.getClientIdIssuedAt()` straight onto the entity. That property is
+  optional on `RegisteredClient` and `DataInitializer` never sets it, so the copy overwrote the
+  entity's `Instant.now()` field default with null and the insert failed against
+  `client_id_issued_at TIMESTAMPTZ NOT NULL`. Now coalesces to `Instant.now()` in the repository,
+  so it holds for any client saved through it, not just the seeded pair.
+
+**Verified live:** `/login`, `/register`, `/account`, `/account/mfa` (QR renders as inline SVG for a
+real pending enrollment), `/admin/audit`. Signed in as `admin`/`changeit`; the audit console showed
+the `LOGIN_SUCCESS` row, and "Verify chain integrity" reported **chain intact** and then appended its
+own `AUDIT_CHAIN_VERIFIED` row to the chain — the documented behaviour, observed end-to-end.
+
+**Why:** These two bugs made a fresh-database boot impossible, so they blocked the Phase 6 live
+deploy outright. Both were invisible locally because the Testcontainers ITs are skipped on this
+machine (no headless Docker, per the build-env notes).
+
+**Next session:**
+1. **Check CI.** The Flyway gap should have failed `AuthServerIntegrationTest` and
+   `RefreshTokenRotationIntegrationTest` on the GitHub runner — if those went green, the ITs are not
+   exercising a fresh schema and that is worth understanding before trusting them.
+2. Consider a root (`/`) mapping: after login Spring Security redirects to `/`, which has no
+   controller, so a successful sign-in currently lands on a Whitelabel 404. `/account` is the
+   obvious landing page.
+3. Local run notes: other projects on this machine hold 5432/6379/3000, so Postgres was run on
+   **5435** (`--spring.datasource.url=jdbc:postgresql://localhost:5435/aegis_auth`); the JVM must be
+   started with `-Duser.timezone=Asia/Kolkata` because Postgres 18 rejects the legacy `Asia/Calcutta`
+   alias the Windows JVM reports. Both are captured in `.claude/launch.json` (`auth-server` config).
+
 ## 2026-07-14 — Technology stack reference guide (docs/TECH_STACK.md)
 **What:** New `docs/TECH_STACK.md` — a study/interview-prep reference covering every technology in
 the platform: what it is, where it's used in this repo, why it was chosen, its USP, and the
@@ -394,3 +509,51 @@ depth. Every in-memory / dev-only shortcut is intentional and tracked in ROADMAP
 - Boot 4.x is very new; if `mvn` reports unresolved artifacts, double-check the exact starter
   coordinates and that Maven Central has the 4.1.0 / 2025.1.2 artifacts.
 - Nothing here is production-ready yet — it is a scaffold. Do not deploy.
+
+## 2026-08-31 — Cinematic hero on the demo console
+
+**What:** Replaced the gradient header of `aegis-gateway/src/main/resources/static/index.html`
+with a full-viewport hero built on the supplied artwork (`asset/BG2.png`, copied to
+`static/assets/img/hero-bg.png` — `/assets/**` is already permitted in `GatewaySecurityConfig`).
+Nav bar (logo · section links · Sign In + outlined "Your Account"), an oversized light-weight
+"Aegis" wordmark with the "Zero trust, proven live." line, an outlined pill CTA plus a plain
+text link, and a three-column hero footer (caption · description · "[Scroll to Explore]").
+
+**Why:** The console is the first thing a reviewer sees; it now reads as a product landing page
+instead of a dashboard. The theme is carried through the rest of the page — base background
+darkened to `#070b14` so the hero fades into the body with no seam.
+
+**Notes:**
+- Three scrims (left, top, bottom) keep the nav, headline, and footer legible over the artwork
+  without washing it out; the bottom one lands exactly on `--bg`.
+- The four JS-populated link ids (`link-login`/`link-account`/`link-audit`/`link-jwks`) moved
+  into the nav unchanged, so `applyConfig()` still wires them.
+- Section anchors `#identity` / `#scenarios` added for the hero CTAs; `scroll-behavior:smooth`.
+- The image is ~2.3 MB PNG. It is preloaded, but converting it to WebP/AVIF would cut the
+  hero's LCP substantially — worth doing before the deployment is published.
+
+## 2026-08-31 (later) — One artwork behind the whole console
+
+**What:** The hero background became the page background. `body::before` paints the artwork
+`position:fixed` behind the entire document (`cover`, so it fills any viewport without
+distortion) and `body::after` lays a light global scrim over it. The header no longer carries
+its own copy of the image — it just adds a left/top scrim for the nav and headline, so the
+hero shows the artwork almost bare.
+
+Everything below the hero now lives in `<main class="console">`, a sheet of dark glass
+(`rgba(7,11,20,.55)` at its top edge deepening to `.93`) that the console rides on: the
+sections, panels, and scenario cards render on top of the image, and the valley is still
+visibly underneath. Panels and scenario cards got `backdrop-filter: blur(8px)`; the code
+blocks and the sticky log-table header changed from opaque `#0b1120` to translucent inks so
+they read as insets on the glass rather than holes punched through it. `body` is a flex
+column with `.console{flex:1 0 auto}` so the sheet reaches the bottom of the viewport even
+when the content is short — otherwise a bare band of artwork hung below the last section.
+
+**Fixed:** the previous entry's `#scenarios` anchor collided with the `<div class="grid"
+id="scenarios">` that the JS fills with scenario cards — `getElementById` returned the
+heading, so the cards would have rendered into the `<h2>`. The anchor is now `#probe`.
+
+**Note on verification:** the preview pane fails to paint scrolled content on this page
+(hit-testing confirms the DOM and stacking are correct; it is a capture artifact, not a
+layout bug). Verified instead by shrinking the hero and using a tall viewport so the whole
+document sits above the fold.

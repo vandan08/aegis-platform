@@ -1,8 +1,82 @@
 # Aegis — Demo Script
 
-A ~5-minute walkthrough that shows the zero-trust story end to end. Works as a live demo or a
-recording outline. Commands assume the [README quickstart](../README.md) stack is up
-(`docker compose up -d` + the three services running).
+Two scripts for two audiences.
+
+- **[Script A — the console walkthrough](#script-a--the-console-walkthrough-3-minutes)**: browser
+  only, no terminal. This is the one to record for a portfolio or a client, and the one to link.
+- **[Script B — the terminal deep dive](#script-b--the-terminal-deep-dive-5-minutes)**: `curl`,
+  traces, mTLS, SBOM. This is the one for an engineering interview.
+
+---
+
+# Script A — the console walkthrough (3 minutes)
+
+Everything happens at the gateway's root URL (`https://app.yourdomain.com`, or
+`http://localhost:8080` locally). See [DEPLOYMENT.md](DEPLOYMENT.md) to get a public URL.
+
+**Why record this one:** the viewer watches a real policy engine refuse real requests, live, with
+the reasoning on screen. No slides, no narration required to make the point land.
+
+### Before you hit record
+- Have the stack up and **already warm** — click through once so nothing cold-starts on camera.
+- Sign out, so you start from the signed-out state.
+- Zoom the browser to ~125%; the response bodies are small text.
+
+### 0:00 — What this is (20s)
+Open the console. Read the headline. One sentence: *"This is a zero-trust platform — an OAuth2
+authorization server, a policy-enforcing gateway, and a service behind it. Everything you're about
+to see is live."*
+
+### 0:20 — Get a real identity (40s)
+Click **Sign in with Aegis** → you land on the Aegis login page → sign in as the sandbox user.
+
+Point out on the way back: *"That was a real Authorization Code flow with PKCE. The token now on
+screen was signed a second ago."* Show the decoded token panel — the `RS256` algorithm, the `kid`
+identifying which signing key, the scopes, and the **expiry counting down from five minutes**.
+
+> The countdown is the best 3 seconds of the video. Short-lived credentials stop being a claim in a
+> README and become a number ticking on screen.
+
+### 1:00 — Allowed (20s)
+Run **Read the demo API**. 200, `policy: allow`, and the response comes from the *downstream*
+service — which validated the same token again itself.
+
+### 1:20 — Refused, and why (60s)
+This is the core. Run these three back to back:
+
+| Scenario | What to say |
+|---|---|
+| **Read someone else's profile** | *"Same valid token, same endpoint, different owner — 403. And the service behind the gateway has no authorization code at all. The refusal happened at the edge."* |
+| **No token at all** | *"Zero trust means being on the network buys you nothing."* |
+| **Tampered signature** | *"One character of the signature flipped. It fails cryptographically — no revocation list, no lookup."* |
+
+Expand the deny response and read the `evaluated` block aloud: subject, roles, scopes, action,
+path, hour. *"It tells you exactly what it judged you on."*
+
+### 2:20 — Attributes, not just roles (20s)
+Run **Write, inside a time window**. Say the UTC hour shown on the page. Outside 09:00–17:00 UTC the
+identical request is refused — *"the decision depends on an attribute of the request, not just on
+who you are."*
+
+### 2:40 — Abuse control (20s)
+Run **Burst 25 requests**. 20 allowed, 5 rate-limited — *"and the bucket is keyed to my identity,
+not my IP, so one noisy caller can't spend everyone else's budget."*
+
+### 3:00 — The receipts (optional 30s)
+Follow the **Tamper-evident audit log** link, sign in as admin, click **Verify chain integrity**.
+*"Every security event is hash-chained. Editing one row breaks the chain, and the console will tell
+you which row."*
+
+### Closing line
+*"Short-lived signed identity, verified at every hop, authorized by versioned policy that fails
+closed — and you just watched it refuse me four different ways."*
+
+---
+
+# Script B — the terminal deep dive (5 minutes)
+
+Commands assume the [README quickstart](../README.md) stack is up (`docker compose up -d` + the
+three services running).
 
 > Tip for recording: keep three panes — the running services (JSON logs), a shell for `curl`, and
 > browser tabs for Grafana/Jaeger. Narrate the *why* at each step, not just the *what*.
