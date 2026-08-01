@@ -31,3 +31,12 @@ logs/
 
 # Local IDE / agent tooling config (harness-specific, not project source)
 .claude/
+
+# deployment secrets
+deploy/.env
+
+# scrollcraft build artefacts (generated frames, renders, deps)
+scrollcraft/builds/*/node_modules/
+scrollcraft/builds/*/raw/
+scrollcraft/builds/*/lab/
+scrollcraft/builds/*/assets/

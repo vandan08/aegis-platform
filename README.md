@@ -11,6 +11,29 @@
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-black)]()
 [![Status](https://img.shields.io/badge/status-Phase_6_in_progress-blue)]()
 
+## Live demo
+
+**[▶ Open the Zero-Trust Console](#)** — replace this link once deployed
+([DEPLOYMENT.md](docs/DEPLOYMENT.md) walks through it), or run it locally at
+<http://localhost:8080>.
+
+The gateway serves an interactive console at its root. Sign in through a real OAuth2
+Authorization Code + PKCE flow, then fire real requests through the live enforcement path and watch
+the policy engine allow or refuse each one:
+
+| Scenario | Outcome |
+|---|---|
+| `GET /api/demo/whoami` with `demo.read` | **200** — proxied; the downstream re-validates the token |
+| `GET /api/users/{someone-else}` | **403** — ABAC ownership rule, refused at the edge |
+| `POST /api/demo/echo` outside 09:00–17:00 UTC | **403** — time-of-day attribute |
+| No token / tampered signature | **401** — rejected before policy is consulted |
+| 25 requests at once | **20 allowed, 5 × 429** — limiter keyed to caller identity |
+
+Every denial shows the exact input the policy was evaluated on, and the decoded token panel shows
+the five-minute expiry counting down. Nothing is mocked.
+
+Recording a walkthrough? [`docs/DEMO.md`](docs/DEMO.md) has a shot-by-shot script.
+
 ## Why this project
 Zero-trust IAM is one of the highest-signal domains in backend security (think Okta, Auth0,
 Cloudflare, HashiCorp). This project demonstrates OAuth2/OIDC, JWT-based auth, an API gateway as a

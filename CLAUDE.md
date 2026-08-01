@@ -77,6 +77,8 @@ older JDK is available you can compile/verify with `-Dmaven.compiler.release=<n>
 Java-25-only syntax). The auth-server integration test needs Docker (Testcontainers Postgres).
 
 ## Current status — Phases 1–5 DONE; Phase 6 (polish) IN PROGRESS
+> Phase 6 now has a **live, interactive demo console** and two working deployment paths; what is
+> left is running one of them and recording it.
 **Done (Phase 5 — DevSecOps & delivery):** security posture enforced by tests + a pipeline.
 - **Security tests:** `TokenSecurityTest` rejects `alg=none`, untrusted-key sigs, tampered payloads,
   expired, wrong issuer, malformed (all → 401) + positive control; `authz_test.rego` blocks scope
@@ -111,8 +113,48 @@ red-team narrative (`THREAT_MODEL.md`), demo script (`docs/DEMO.md`), README bad
   and **`/account/mfa`** (QR code of the `otpauth://` URI via zxing:core → inline SVG in
   `QrSvgRenderer`, manual-secret fallback, activation form). Shared `MfaEnrollmentService`
   backs both the pages and `/api/mfa/**`, preserving the two-step activation rule + audit.
-**Remaining:** live cloud deploy + recording; hardening follow-ups (signing key → Vault transit,
-Vault AppRole auth, mTLS for JWKS/datastore links) — all designed & documented, need infra to ship.
+- **Interactive demo console (`aegis-gateway`, served at `/`):** a static, framework-free page
+  (`static/index.html`) that runs a real Authorization Code + PKCE login against the auth server
+  and then fires real requests through the gateway — allow/deny/401/429 with the policy input on
+  screen. Config comes from `GET /playground/config` (`aegis.playground.*`), so one image runs in
+  every environment. `/` is mapped by an explicit `RouterFunction` (`PlaygroundConfig`), not the
+  welcome-page handler, because `/` is also the OAuth2 **redirect URI** and must return 200 with
+  the `?code=` query intact. Auth server allows CORS on `/oauth2/**` for the console's origin
+  (`aegis.cors.allowed-origins`); the browser client requests `demo.read`+`demo.write`.
+  The page rides on **one artwork end to end** (`static/assets/img/hero-bg.png`, served under the
+  already-permitted `/assets/**`): `body::before` paints it `position:fixed` behind the whole
+  document, the hero (nav bar, oversized "Aegis" wordmark, outlined pill CTA, scroll cue) shows
+  it nearly bare, and everything below sits in `<main class="console">` — a sheet of dark glass
+  the sections/panels/cards render on top of. `body` is a flex column with `.console{flex:1 0
+  auto}` so the sheet always reaches the viewport bottom. Follow-up: convert the ~2.3 MB PNG to
+  WebP/AVIF for LCP.
+- **New endpoints backing the policy demo:** `POST /api/demo/echo` (time-windowed write) and
+  `GET /api/users/{id}` (ABAC ownership) in resource-demo, plus a `user-profile` gateway route.
+  The Rego policy already covered both — no policy change was needed.
+- **PEP now explains itself:** `PolicyEnforcementFilter` stamps `X-Aegis-Policy-Decision:
+  allow|deny` (via `beforeCommit`, so it survives proxying) and a denial returns a JSON body naming
+  the evaluated subject/roles/scopes/action/path/hour — never the token, never the ruleset.
+- **Deployable:** every URL, port, and credential is env-driven (`PORT`, `AEGIS_ISSUER_URI`,
+  `AEGIS_OPA_URL`, `REDIS_URL`, `AEGIS_RESOURCE_DEMO_URI`, `DB_HOST/PORT/NAME` …). New `cloud`
+  profile turns OTLP export off and sets `forward-headers-strategy: framework` (without it, an
+  auth server behind a TLS proxy builds `http://` redirects and OAuth2 breaks). Ship paths:
+  `deploy/compose.prod.yml` + `deploy/Caddyfile` (single VM, automatic Let's Encrypt —
+  **recommended**) and `render.yaml` (managed, free tier, cold starts). `policies/Dockerfile`
+  bakes the Rego into an immutable image. Full guide: `docs/DEPLOYMENT.md`.
+- **Client seeding is now an upsert.** `DataInitializer` reconciles `aegis-web-client` on every
+  boot from `aegis.demo.web-client-redirect-uris`, because a deployment that moves to a new public
+  URL must have that redirect URI registered. Accounts are still create-once. Seeds a non-admin
+  `alice` for the sandbox (an admin would pass every scenario via the RBAC rule).
+
+**Fixed along the way (was a live-demo blocker):** the gateway's `cloud.gateway.*` block had been
+indented under `aegis:` instead of `spring:`. Unknown YAML keys bind to nothing, so the gateway
+started cleanly with an **empty route table** and every proxied path 404'd. Now covered by
+`GatewayRouteConfigurationTest`, which asserts both routes bind and that every route carries the
+rate limiter + circuit breaker.
+
+**Remaining:** record the walkthrough (`docs/DEMO.md` Script A) and publish the link; hardening
+follow-ups (signing key → Vault transit, Vault AppRole auth, mTLS for JWKS/datastore links) — all
+designed & documented, need infra to ship.
 
 **Done (Phase 4):** observability, resilience, service identity, and secrets.
 - **mTLS gateway↔resource-demo:** opt-in `mtls` profile on both services (Boot SSL bundles;
