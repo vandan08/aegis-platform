@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Aegis world — render source</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/*
+  The world. Not a page: a 16000x9000 technical drawing that a camera flies through.
+  Rendered offline to frames by render.mjs, never shipped to a visitor.
+
+  Deep-zoom logic: every object declares the scale band it is legible in. At 0.10 the
+  reader sees a schematic; at 1.85 they are reading one line of JSON. Nothing is ever
+  shown at a size where it is neither texture nor text, which is the state that reads
+  as "blurry screenshot" rather than "camera".
+*/
+:root{
+  --canvas:#05070D;
+  --ground:#080B14;
+  --plate:#0C1120;
+  --ink:#E8EDF5;
+  --ink-soft:#9AAAC4;
+  --ink-faint:#66779A;
+  --line:#2A3852;
+  --accent:#22D3EE;
+  --deny:#FF4D4D;
+  --mono:"JetBrains Mono", ui-monospace, monospace;
+  --display:"Archivo", system-ui, sans-serif;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{background:var(--canvas); overflow:hidden;}
+#viewport{position:fixed; inset:0; overflow:hidden; background:var(--canvas);}
+#camera{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform;}
+#stage{position:relative; width:16000px; height:9000px;}
+
+/* ---------- blueprint ground ---------- */
+.grid{position:absolute; inset:0;
+  background-image:
+    linear-gradient(to right, rgba(96,130,190,.22) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(96,130,190,.22) 1px, transparent 1px),
+    linear-gradient(to right, rgba(96,130,190,.48) 2px, transparent 2px),
+    linear-gradient(to bottom, rgba(96,130,190,.48) 2px, transparent 2px);
+  background-size:120px 120px, 120px 120px, 960px 960px, 960px 960px;
+}
+.vignette{position:absolute; inset:0;
+  background:radial-gradient(ellipse 82% 74% at 45% 46%, transparent 62%, rgba(3,5,10,.26) 100%);}
+
+/* ---------- primitives ---------- */
+.o{position:absolute;}                       /* every world object */
+.block{border:2px solid var(--line); background:linear-gradient(180deg, rgba(29,40,66,.96), rgba(14,20,36,.96));}
+.block--live{border-color:rgba(34,211,238,.62);}
+.block--dark{border-color:#232E42; background:rgba(12,17,28,.94);}
+.rule{position:absolute; background:var(--line);}
+.tick{position:absolute; background:rgba(34,211,238,.5);}
+
+.lbl{font-family:var(--mono); color:var(--ink-soft); text-transform:uppercase;
+     letter-spacing:.34em; white-space:nowrap;}
+.name{font-family:var(--display); color:var(--ink); font-weight:600; letter-spacing:-.02em; white-space:nowrap;}
+.meta{font-family:var(--mono); color:var(--ink-faint); white-space:pre; line-height:1.55;}
+.code{font-family:var(--mono); color:var(--ink-soft); white-space:pre; line-height:1.6;}
+.accent{color:var(--accent);}
+.deny{color:var(--deny);}
+
+/* plates: real captures, framed like figures in a manual */
+.plate{border:2px solid var(--line); background:#0A0E1A; overflow:hidden;
+       box-shadow:0 40px 120px rgba(0,0,0,.66);}
+.plate img{display:block; width:100%; height:100%; object-fit:cover; object-position:top left;}
+.plate--glow{border-color:rgba(34,211,238,.5);}
+.plate--deny{border-color:rgba(255,77,77,.55);}
+.cap{font-family:var(--mono); color:var(--ink-faint); letter-spacing:.22em; text-transform:uppercase; white-space:nowrap;}
+
+/* the stamp only resolves deep in the flight */
+.arrow{position:absolute; width:0; height:0;}
+.dim{position:absolute; border-top:2px dashed rgba(96,130,190,.30);}
+.dimlbl{font-family:var(--mono); color:var(--ink-faint); letter-spacing:.2em; text-transform:uppercase; white-space:nowrap;}
+.checkrow{display:flex; align-items:center; gap:38px; margin-bottom:46px;}
+.checknum{font-family:var(--mono); color:var(--accent); font-size:46px; letter-spacing:.1em;}
+.checktxt{font-family:var(--display); color:var(--ink); font-size:70px; font-weight:500;}
+.checkbar{flex:1; height:2px; background:var(--line);}
+.stamp{font-family:var(--display); font-weight:700; color:var(--deny);
+       border:12px solid var(--deny); letter-spacing:.06em; text-align:center;
+       transform:rotate(-7deg); opacity:.92;}
+</style>
+</head>
+<body>
+<div id="viewport"><div id="camera"><div id="stage">
+  <div class="grid"></div>
+  <div class="vignette"></div>
+</div></div></div>
+
+<script>
+const stage = document.getElementById('stage');
+
+/* Objects declare [inMin, inMax] — the scale band where they are legible. Outside it
+   they fade, so the same coordinate space is a schematic at 0.10 and a document at 1.85. */
+function add(html, x, y, w, h, cls, band) {
+  const el = document.createElement('div');
+  el.className = 'o ' + (cls || '');
+  el.style.cssText = `left:${x}px; top:${y}px; width:${w}px; ${h ? `height:${h}px;` : ''}`;
+  el.innerHTML = html;
+  if (band) { el.dataset.band = band.join(','); }
+  stage.appendChild(el);
+  return el;
+}
+function line(x, y, w, h, color) {
+  const el = document.createElement('div');
+  el.className = 'o';
+  el.style.cssText = `left:${x}px; top:${y}px; width:${w}px; height:${h}px; background:${color || 'var(--line)'};`;
+  stage.appendChild(el);
+  return el;
+}
+
+/* ============================ THE SCHEMATIC ============================ */
+
+/* --- connective tissue, drawn first so blocks sit on top --- */
+line(2900, 4480, 3400, 3, 'rgba(34,211,238,.30)');    // client -> gateway
+line(7500, 4480, 4100, 3, '#18202F');                  // gateway -> resource (dark: refused)
+line(6180, 2600, 3, 1500, 'rgba(34,211,238,.22)');     // auth -> gateway
+line(6180, 5300, 3, 1200, 'rgba(34,211,238,.22)');     // gateway -> policy
+line(11900, 5100, 3, 1700, '#141A28');                 // resource -> stores
+
+/* --- 1. CLIENT / the console. Where the flight ends. --- */
+add(`<div class="block" style="width:100%;height:100%"></div>`, 1150, 3550, 1750, 1850, '', [0.06, 3]);
+add(`<div class="lbl" style="font-size:84px">01 · Client</div>`, 1190, 3400, 900, null, '', [0.06, 3]);
+add(`<div class="plate plate--glow" style="width:100%;height:100%"><img src="../raw/console-signedout.png" alt=""></div>`,
+    1230, 3630, 1590, 1000, '', [0.06, 3]);
+add(`<div class="name" style="font-size:136px">The console</div>
+     <div class="meta" style="font-size:54px; margin-top:26px">Public client. No secret.\nAuthorization Code + PKCE.</div>`,
+    1230, 4700, 1600, null, '', [0.12, 3]);
+
+/* --- 2. AUTH SERVER --- */
+add(`<div class="block block--live" style="width:100%;height:100%"></div>`, 5200, 1150, 2000, 1450, '', [0.06, 3]);
+add(`<div class="lbl" style="font-size:84px">02 · Authorization server</div>`, 5240, 1000, 1400, null, '', [0.06, 3]);
+add(`<div class="plate" style="width:100%;height:100%"><img src="../raw/login.png" alt=""></div>`,
+    5280, 1230, 1000, 620, '', [0.1, 3]);
+add(`<div class="name" style="font-size:108px">Issues the identity</div>
+     <div class="meta" style="font-size:48px; margin-top:22px">RS256 · rotating keys · 5 min life</div>`,
+    5280, 1930, 1900, null, '', [0.12, 3]);
+add(`<div class="cap" style="font-size:34px">Fig. 01 — sign-in, live</div>`, 5280, 1880, 900, null, '', [0.3, 3]);
+
+/* --- 3. GATEWAY: the enforcement point. The camera lives here. --- */
+add(`<div class="block block--live" style="width:100%;height:100%"></div>`, 4600, 2700, 2900, 2600, '', [0.06, 3]);
+add(`<div class="lbl accent" style="font-size:96px">03 · Policy enforcement point</div>`, 4640, 2540, 2000, null, '', [0.06, 3]);
+add(`<div class="name" style="font-size:156px">The gateway</div>`, 4680, 2790, 2000, null, '', [0.08, 0.72]);
+
+/* What the gateway does, legible only at wide and mid zoom. Without this the block
+   is an empty rectangle for the first two legs, which reads as a missing asset. */
+add(`<div class="checkrow"><div class="checknum">01</div><div class="checktxt">Verify the signature</div><div class="checkbar"></div></div>
+     <div class="checkrow"><div class="checknum">02</div><div class="checktxt">Read the claims</div><div class="checkbar"></div></div>
+     <div class="checkrow"><div class="checknum">03</div><div class="checktxt">Ask the policy engine</div><div class="checkbar"></div></div>
+     <div class="checkrow"><div class="checknum">04</div><div class="checktxt">Allow, or refuse here</div><div class="checkbar"></div></div>`,
+    4700, 4380, 2700, null, '', [0.06, 0.42]);
+
+/* --- technical-drawing furniture: leaders, dimensions, a scale bar --- */
+add(`<div class="dim" style="width:100%"></div>
+     <div class="dimlbl" style="font-size:50px; margin-top:24px">Request path · 3 hops · every one verifies</div>`,
+    2900, 4760, 8700, null, '', [0.06, 0.34]);
+
+add(`<div class="dimlbl" style="font-size:48px">Token minted here</div>
+     <div class="dim" style="width:100%; margin-top:16px"></div>`, 6300, 2180, 1500, null, '', [0.08, 0.34]);
+
+add(`<div class="dimlbl deny" style="font-size:48px">Refused here. The hop below never happens.</div>
+     <div class="dim" style="width:100%; margin-top:16px; border-color:rgba(255,77,77,.34)"></div>`,
+    7700, 4300, 3600, null, '', [0.08, 0.34]);
+
+add(`<div style="display:flex; align-items:flex-end; gap:0">
+       <div style="width:240px;height:20px;border:2px solid var(--line);border-right:0"></div>
+       <div style="width:240px;height:20px;border:2px solid var(--line);background:rgba(96,130,190,.18)"></div>
+     </div>
+     <div class="dimlbl" style="font-size:38px; margin-top:20px">Scale · schematic, not to size</div>`,
+    12900, 8180, 900, null, '', [0.06, 0.3]);
+
+/* The dossier. Deliberately small in world space: at 0.12 it is fine texture inside the
+   gateway, and it only becomes a document at 1.0+. That ratio IS the depth of the flight,
+   so sizing it generously here would have flattened legs 3 and 4 into the same shot. */
+
+/* -- token cluster: leg 3 frames this at s=1.05 -- */
+add(`<div class="plate" style="width:100%;height:100%"><img src="../raw/token-json.png" alt=""></div>`,
+    4760, 3020, 560, 345, '', [0.42, 3]);
+add(`<div class="cap" style="font-size:15px">Fig. 02 — decoded access token</div>`, 4760, 3378, 560, null, '', [0.62, 3]);
+
+add(`<div style="display:flex; height:100%; border:1px solid var(--line)">
+       <div style="flex:0 0 26%; background:rgba(34,211,238,.20); border-right:1px solid var(--line)"></div>
+       <div style="flex:1; background:rgba(34,211,238,.09); border-right:1px solid var(--line)"></div>
+       <div style="flex:0 0 30%; background:rgba(255,77,77,.14)"></div>
+     </div>`, 5390, 3020, 570, 46, '', [0.6, 3]);
+add(`<div class="meta accent" style="font-size:14px">header</div>`, 5396, 3074, 200, null, '', [0.8, 3]);
+add(`<div class="meta" style="font-size:14px">payload</div>`, 5560, 3074, 200, null, '', [0.8, 3]);
+add(`<div class="meta deny" style="font-size:14px">signature</div>`, 5800, 3074, 200, null, '', [0.8, 3]);
+add(`<div class="code" style="font-size:15px">{
+  "sub"   : "aegis-service-client",
+  "iss"   : "http://localhost:9000",
+  "scope" : ["demo.read"],
+  "exp"   : 1787320137,
+  "kid"   : "86c687c4-75c9-4be2"
+}</div>`, 5390, 3110, 620, null, '', [0.7, 3]);
+add(`<div class="lbl" style="font-size:15px">Verified against the JWKS on every hop</div>`,
+    5390, 3300, 700, null, '', [0.85, 3]);
+
+/* -- deny cluster: leg 4 frames this at s=1.45. THE PEAK. -- */
+add(`<div class="plate plate--deny" style="width:100%;height:100%"><img src="../raw/card-3.png" alt=""></div>`,
+    5000, 3560, 400, 520, '', [0.5, 3]);
+add(`<div class="cap deny" style="font-size:14px">Fig. 03 — policy denial, live</div>`, 5000, 4092, 460, null, '', [0.8, 3]);
+
+add(`<div class="lbl" style="font-size:15px">The input the gateway built</div>`, 5470, 3560, 700, null, '', [0.8, 3]);
+add(`<div class="code" style="font-size:15px">subject.id     "aegis-service-client"
+action         "GET"
+resource.path  "/api/users/mallory"
+subject.scopes ["demo.read"]</div>`, 5470, 3592, 700, null, '', [0.8, 3]);
+
+add(`<div class="lbl" style="font-size:15px">policies/authz.rego</div>`, 5470, 3730, 700, null, '', [0.9, 3]);
+add(`<div class="code" style="font-size:15px">allow if {
+  segments[2] == <span class="accent">subject.id</span>
+}
+<span style="color:#66779A">"mallory" != "aegis-service-client"</span>
+<span class="deny">default allow := false</span></div>`, 5470, 3762, 720, null, '', [0.9, 3]);
+
+add(`<div class="stamp" style="font-size:66px; padding:12px 26px">403 DENIED</div>`,
+    5470, 3910, 430, null, '', [1.1, 3]);
+
+/* --- 4. POLICY ENGINE --- */
+add(`<div class="block block--live" style="width:100%;height:100%"></div>`, 5200, 6500, 2000, 1250, '', [0.06, 3]);
+add(`<div class="lbl" style="font-size:84px">04 · Policy decision point</div>`, 5240, 6350, 1400, null, '', [0.06, 3]);
+add(`<div class="name" style="font-size:108px">OPA</div>
+     <div class="meta" style="font-size:48px; margin-top:22px">Versioned Rego. 9 unit tests.\nUnreachable means deny.</div>`,
+    5280, 6600, 1800, null, '', [0.12, 3]);
+
+/* --- 5. RESOURCE SERVICE: dark, because the request never arrived --- */
+add(`<div class="block block--dark" style="width:100%;height:100%"></div>`, 11600, 3550, 2100, 1550, '', [0.06, 3]);
+add(`<div class="lbl" style="font-size:84px">05 · Downstream service</div>`, 11640, 3400, 1400, null, '', [0.06, 3]);
+add(`<div class="name" style="font-size:108px; color:#7386A3">Never reached</div>
+     <div class="meta" style="font-size:48px; margin-top:22px">No authorization code of its own.\nStill validates the token itself.</div>`,
+    11680, 3640, 1900, null, '', [0.12, 3]);
+add(`<div class="plate" style="width:100%;height:100%; opacity:.5"><img src="../raw/request-log.png" alt=""></div>`,
+    11680, 4180, 1900, 460, '', [0.2, 3]);
+add(`<div class="cap" style="font-size:34px">Fig. 04 — request log</div>`, 11680, 4680, 900, null, '', [0.4, 3]);
+
+/* --- 6. DATA STORES --- */
+add(`<div class="block block--dark" style="width:100%;height:100%"></div>`, 11000, 6800, 3000, 900, '', [0.06, 3]);
+add(`<div class="lbl" style="font-size:84px">06 · State</div>`, 11040, 6650, 900, null, '', [0.06, 3]);
+add(`<div class="meta" style="font-size:50px">Postgres 18  ·  users, clients, signing keys,\nhash-chained audit log        Redis 8  ·  rate-limit buckets</div>`,
+    11080, 6920, 2800, null, '', [0.12, 3]);
+
+/* --- title block, bottom-left, like a drawing's title block --- */
+add(`<div style="border:2px solid var(--line); padding:44px 56px; background:rgba(8,11,20,.85)">
+       <div class="lbl accent" style="font-size:48px">Aegis</div>
+       <div class="name" style="font-size:92px; margin-top:22px">Zero-trust identity and access</div>
+       <div class="meta" style="font-size:44px; margin-top:24px">Sheet 1 of 1  ·  request path, client to service\nEvery hop verifies. Nothing is trusted for being inside.</div>
+     </div>`, 1150, 6900, 3200, null, '', [0.06, 3]);
+
+/* ============================ THE CAMERA ============================ */
+
+const VW = 1600, VH = 900;
+
+/* Keyframes: one per leg boundary. Position in world px, s = scale. */
+const KEYS = [
+  { x: 7575, y: 4400, s: 0.115 },  // 0  arrival: the system whole
+  { x: 7000, y: 4300, s: 0.175 },  // 1  approach begins
+  { x: 6050, y: 3900, s: 0.480 },  // 2  the gateway fills the frame
+  { x: 5360, y: 3220, s: 1.050 },  // 3  inside the token
+  { x: 5545, y: 3830, s: 1.450 },  // 4  the refusal  <- PEAK
+  { x: 11900, y: 4400, s: 0.400 }, // 5  pull back: the service never touched
+  { x: 5200, y: 4450, s: 0.120 },  // 6  the system whole again, console prominent
+];
+
+/* Catmull-Rom through the keyframes. A per-leg ease would zero the camera's velocity
+   at every boundary, which is exactly where the seams are: the world would stop dead
+   once per leg and the crossfade would have nothing to hide. C1 continuity means the
+   camera carries its speed through the joins and the seam has no signature. Scale is
+   interpolated in log space, because linear zoom reads as a rush at the wide end and
+   a crawl at the deep end. */
+function cr(p0, p1, p2, p3, t) {
+  const t2 = t * t, t3 = t2 * t;
+  return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+}
+function at(u) {
+  const n = KEYS.length;
+  const i = Math.max(0, Math.min(n - 2, Math.floor(u)));
+  const t = Math.min(1, Math.max(0, u - i));
+  const k = (j) => KEYS[Math.max(0, Math.min(n - 1, j))];
+  return {
+    x: cr(k(i - 1).x, k(i).x, k(i + 1).x, k(i + 2).x, t),
+    y: cr(k(i - 1).y, k(i).y, k(i + 1).y, k(i + 2).y, t),
+    s: Math.exp(cr(Math.log(k(i - 1).s), Math.log(k(i).s), Math.log(k(i + 1).s), Math.log(k(i + 2).s), t)),
+  };
+}
+
+const cam = document.getElementById('camera');
+const banded = Array.prototype.slice.call(stage.querySelectorAll('[data-band]'));
+
+window.setCamera = function (u) {
+  const c = at(u);
+  cam.style.transform =
+    `translate(${VW / 2}px, ${VH / 2}px) scale(${c.s}) translate(${-c.x}px, ${-c.y}px)`;
+  // Fade each object across the edges of its legible band.
+  for (const el of banded) {
+    const [lo, hi] = el.dataset.band.split(',').map(Number);
+    let a = 1;
+    if (c.s < lo) a = Math.max(0, 1 - (lo - c.s) / (lo * 0.55));
+    else if (c.s > hi) a = Math.max(0, 1 - (c.s - hi) / (hi * 0.5));
+    el.style.opacity = a.toFixed(3);
+  }
+  return c;
+};
+window.setCamera(0);
+</script>
+</body>
+</html>
