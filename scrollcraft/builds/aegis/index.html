@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Aegis — zero-trust identity and access</title>
+<meta name="description" content="A zero-trust identity and access platform. Signed identity, verified at every hop, authorized by policy that fails closed."/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="scrollcraft.css">
+<style>
+:root{
+  --sc-canvas:#05070D;
+  --sc-surface:#0C1120;
+  --sc-ink:#EAF0F8;
+  --sc-ink-soft:#93A4BF;
+  --sc-accent:#22D3EE;
+  --sc-accent-ink:#04121A;
+  --sc-font-display:"Archivo", system-ui, sans-serif;
+  --sc-font-text:"Archivo", system-ui, sans-serif;
+  --sc-font-mono:"JetBrains Mono", ui-monospace, monospace;
+  /* Not a second accent. One state colour, used at exactly one moment on the page,
+     because the moment is a refusal and a refusal is not cyan. */
+  --deny:#FF4D4D;
+}
+body{background:var(--sc-canvas); color:var(--sc-ink);}
+
+/* ---------------- the map. In this grammar the nav is not a bar. ---------------- */
+.map{position:fixed; z-index:60; left:var(--sc-gutter); top:50%; translate:0 -50%;
+     display:flex; flex-direction:column; gap:2px; margin:0; padding:0; list-style:none;}
+.map__item{margin:0;}
+.map__btn{display:flex; align-items:center; gap:.75rem; background:none; border:0; padding:.42rem 0;
+  font-family:var(--sc-font-mono); font-size:.68rem; letter-spacing:.24em; text-transform:uppercase;
+  color:color-mix(in oklab, var(--sc-ink) 42%, transparent); cursor:pointer;
+  transition:color var(--sc-d-fast) var(--sc-ease-out);}
+.map__btn::before{content:""; width:22px; height:1px; background:currentColor;
+  transition:width var(--sc-d-base) var(--sc-ease-out);}
+.map__btn:hover{color:var(--sc-ink);}
+.map__item[aria-current="true"] .map__btn{color:var(--sc-accent);}
+.map__item[aria-current="true"] .map__btn::before{width:46px;}
+.map__btn:focus-visible{outline:2px solid var(--sc-accent); outline-offset:4px;}
+
+/* the wordmark sits in the composition, not in a bar */
+.mark{position:fixed; z-index:60; left:var(--sc-gutter); top:clamp(1.5rem,4vh,2.5rem);
+  font-family:var(--sc-font-mono); font-size:.72rem; letter-spacing:.42em; text-transform:uppercase;
+  color:var(--sc-ink); margin:0;}
+
+/* ---------------- copy ---------------- */
+[data-sc-copy]{max-width:min(46rem, 62vw);}
+.sc-copy--lead{left:calc(var(--sc-gutter) + 8.5rem);}
+.k{font-family:var(--sc-font-mono); font-size:.7rem; letter-spacing:.28em; text-transform:uppercase;
+   color:var(--sc-accent); margin:0 0 var(--sc-4);}
+.h{font-family:var(--sc-font-display); font-weight:600; letter-spacing:var(--sc-track-tight);
+   line-height:1.02; margin:0; text-wrap:balance; font-size:var(--sc-t-3xl);}
+.h--hero{font-size:var(--sc-t-4xl);}
+.p{font-family:var(--sc-font-text); color:var(--sc-ink-soft); line-height:var(--sc-leading-body);
+   max-width:44ch; margin:var(--sc-5) 0 0; text-wrap:pretty; font-size:var(--sc-t-base);}
+.sc-copy--trail .p{margin-left:auto;}
+.sc-copy--center .p{margin-inline:auto;}
+.p b{color:var(--sc-ink); font-weight:500;}
+.mono{font-family:var(--sc-font-mono); font-size:.82rem; color:var(--sc-ink-soft); letter-spacing:0;}
+
+.cta{display:inline-flex; align-items:center; gap:.7rem; margin-top:var(--sc-6);
+  background:var(--sc-accent); color:var(--sc-accent-ink); text-decoration:none;
+  font-family:var(--sc-font-display); font-weight:600; font-size:1rem; letter-spacing:-.01em;
+  padding:.95rem 1.6rem; border-radius:var(--sc-r-sm);
+  transition:transform var(--sc-d-fast) var(--sc-ease-out), filter var(--sc-d-fast) var(--sc-ease-out);}
+.cta:hover{filter:brightness(1.08);}
+.cta:active{transform:translateY(1px);}
+.cta:focus-visible{outline:2px solid var(--sc-ink); outline-offset:3px;}
+.cta__note{display:block; margin-top:var(--sc-4); font-family:var(--sc-font-mono);
+  font-size:.72rem; letter-spacing:.04em; color:color-mix(in oklab, var(--sc-ink) 45%, transparent);}
+
+/* ---------------- the signature move: the page refuses you ---------------- */
+.refuse{position:fixed; inset:0; z-index:90; display:grid; place-items:center;
+  padding:var(--sc-gutter); background:color-mix(in oklab, var(--sc-canvas) 92%, transparent);
+  opacity:0; visibility:hidden; transition:opacity 220ms var(--sc-ease-out), visibility 0s 220ms;}
+.refuse[data-open="true"]{opacity:1; visibility:visible; transition:opacity 220ms var(--sc-ease-out);}
+.refuse__card{width:min(46rem,100%); border:1px solid color-mix(in oklab, var(--deny) 55%, transparent);
+  background:#0A0E18; padding:clamp(1.5rem,4vw,2.75rem); border-radius:var(--sc-r-sm);
+  box-shadow:0 40px 120px rgba(0,0,0,.7);
+  transform:translateY(10px) scale(.985); transition:transform 260ms var(--sc-ease-out);}
+.refuse[data-open="true"] .refuse__card{transform:none;}
+.refuse__code{font-family:var(--sc-font-mono); font-size:.72rem; letter-spacing:.3em;
+  text-transform:uppercase; color:var(--deny); margin:0 0 var(--sc-4);}
+.refuse__h{font-family:var(--sc-font-display); font-weight:600; font-size:var(--sc-t-xl);
+  letter-spacing:var(--sc-track-snug); margin:0; line-height:1.08;}
+.refuse__p{font-family:var(--sc-font-text); color:var(--sc-ink-soft); margin:var(--sc-4) 0 0;
+  font-size:var(--sc-t-sm); line-height:1.6; max-width:52ch;}
+.refuse__json{font-family:var(--sc-font-mono); font-size:.76rem; line-height:1.75; margin:var(--sc-5) 0 0;
+  padding:var(--sc-5); background:#06090F; border:1px solid var(--sc-hairline);
+  border-radius:var(--sc-r-sm); color:var(--sc-ink-soft); overflow-x:auto; white-space:pre;}
+.refuse__json .kx{color:var(--sc-accent);}
+.refuse__btn{margin-top:var(--sc-5); background:none; border:1px solid var(--deny); color:var(--deny);
+  font-family:var(--sc-font-display); font-weight:600; font-size:.92rem; padding:.75rem 1.35rem;
+  border-radius:var(--sc-r-sm); cursor:pointer;
+  transition:background var(--sc-d-fast) var(--sc-ease-out), color var(--sc-d-fast) var(--sc-ease-out);}
+.refuse__btn:hover{background:var(--deny); color:#0A0E18;}
+.refuse__btn:focus-visible{outline:2px solid var(--sc-ink); outline-offset:3px;}
+.refuse__hint{margin:var(--sc-4) 0 0; font-family:var(--sc-font-mono); font-size:.68rem;
+  letter-spacing:.06em; color:color-mix(in oklab, var(--sc-ink) 38%, transparent);}
+
+@media (max-width: 860px){
+  .map{display:none;}
+  .sc-copy--lead{left:var(--sc-gutter);}
+  [data-sc-copy]{max-width:none;}
+  .h--hero{font-size:var(--sc-t-2xl);}
+  .h{font-size:var(--sc-t-xl);}
+}
+@media (prefers-reduced-motion: reduce){
+  .refuse, .refuse__card{transition:none;}
+}
+</style>
+</head>
+<body>
+
+<p class="mark">Aegis</p>
+
+<!-- The nav is a map, because a world you cannot skip around in is a video. -->
+<nav aria-label="Waypoints">
+  <ul class="map" id="map">
+    <li class="map__item" data-leg="0"><button class="map__btn" type="button">Arrival</button></li>
+    <li class="map__item" data-leg="1"><button class="map__btn" type="button">Approach</button></li>
+    <li class="map__item" data-leg="2"><button class="map__btn" type="button">Identity</button></li>
+    <li class="map__item" data-leg="3"><button class="map__btn" type="button">Refusal</button></li>
+    <li class="map__item" data-leg="4"><button class="map__btn" type="button">Aftermath</button></li>
+    <li class="map__item" data-leg="5"><button class="map__btn" type="button">Console</button></li>
+  </ul>
+</nav>
+
+<!--
+  Weights hold one pace across the whole flight: 0.216vh of scroll per second of film.
+  The peak (leg 4) is 12s of film and every other leg is 8s, so it owns the largest span
+  on the track WITHOUT the world surging or dragging as the reader crosses into it.
+-->
+<div data-sc-mode="worldflight" data-sc-seam="0.16" data-sc-lerp="0.12">
+
+  <div data-sc-world>
+    <div data-sc-segment data-sc-w="1.74" data-sc-waypoint="Arrival">
+      <img class="sc-world__poster" src="assets/p1.webp" alt="" width="1600" height="900" decoding="async">
+      <video data-sc-src="assets/leg1.mp4" data-sc-src-mobile="assets/leg1-m.mp4" muted playsinline></video>
+    </div>
+    <div data-sc-segment data-sc-w="1.74" data-sc-waypoint="Approach">
+      <img class="sc-world__poster" src="assets/p2.webp" alt="" width="1600" height="900" decoding="async">
+      <video data-sc-src="assets/leg2.mp4" data-sc-src-mobile="assets/leg2-m.mp4" muted playsinline></video>
+    </div>
+    <div data-sc-segment data-sc-w="1.74" data-sc-linger="0.22" data-sc-waypoint="Identity">
+      <img class="sc-world__poster" src="assets/p3.webp" alt="" width="1600" height="900" decoding="async">
+      <video data-sc-src="assets/leg3.mp4" data-sc-src-mobile="assets/leg3-m.mp4" muted playsinline></video>
+    </div>
+    <div data-sc-segment data-sc-w="2.60" data-sc-linger="0.3" data-sc-waypoint="Refusal">
+      <img class="sc-world__poster" src="assets/p4.webp" alt="" width="1600" height="900" decoding="async">
+      <video data-sc-src="assets/leg4.mp4" data-sc-src-mobile="assets/leg4-m.mp4" muted playsinline></video>
+    </div>
+    <div data-sc-segment data-sc-w="1.74" data-sc-waypoint="Aftermath">
+      <img class="sc-world__poster" src="assets/p5.webp" alt="" width="1600" height="900" decoding="async">
+      <video data-sc-src="assets/leg5.mp4" data-sc-src-mobile="assets/leg5-m.mp4" muted playsinline></video>
+    </div>
+    <div data-sc-segment data-sc-w="1.74" data-sc-waypoint="Console">
+      <img class="sc-world__poster" src="assets/p6.webp" alt="" width="1600" height="900" decoding="async">
+      <video data-sc-src="assets/leg6.mp4" data-sc-src-mobile="assets/leg6-m.mp4" muted playsinline></video>
+    </div>
+  </div>
+
+  <div data-sc-world-copy>
+    <div class="sc-world__scrim sc-scrim sc-scrim--band"></div>
+
+    <div class="sc-copy sc-copy--lead" data-sc-copy data-sc-window="hero">
+      <p class="k">Zero-trust identity and access</p>
+      <h1 class="h h--hero">Every request here is a stranger.</h1>
+      <p class="p">Signed identity, verified at every hop, authorized by policy that fails closed.
+        This is the whole system, and the next screen is a request moving through it.</p>
+    </div>
+
+    <div class="sc-copy sc-copy--trail" data-sc-copy data-sc-window="0.170 0.298">
+      <h2 class="h">Being inside the network buys nothing.</h2>
+      <p class="p">The gateway does not care where a request came from. It verifies the signature,
+        reads the claims, and asks a policy engine whether <b>this subject</b> may do
+        <b>this thing</b> to <b>this resource</b>. Then it decides.</p>
+    </div>
+
+    <div class="sc-copy sc-copy--lead" data-sc-copy data-sc-window="0.322 0.452">
+      <h2 class="h">An identity that expires in five minutes.</h2>
+      <p class="p">RS256, signed by a rotating key, validated against the published JWKS at the edge
+        and again inside the service. Decoding a token is not verifying it, and only one of those
+        happens here.</p>
+      <p class="p mono">kid 86c687c4 · alg RS256 · exp +300s</p>
+    </div>
+
+    <!-- Short on purpose. The signature move carries this beat. -->
+    <div class="sc-copy sc-copy--center" data-sc-copy data-sc-window="0.475 0.560">
+      <h2 class="h">Then it refuses.</h2>
+    </div>
+
+    <div class="sc-copy sc-copy--trail" data-sc-copy data-sc-window="0.706 0.838">
+      <h2 class="h">The service behind never saw it.</h2>
+      <p class="p">There is no authorization logic in the downstream service at all. The decision
+        lives in versioned Rego with unit tests, and it is made at the edge, before anything is
+        proxied. A rule that cannot be reached denies rather than admits.</p>
+    </div>
+
+    <div class="sc-copy sc-copy--lead" data-sc-copy data-sc-window="finale">
+      <h2 class="h">Go and be refused yourself.</h2>
+      <p class="p">The console runs a real Authorization Code login with PKCE against the auth
+        server, then fires real requests through this gateway. Nothing on it is a mockup.</p>
+      <a class="cta" id="cta" href="http://localhost:8080/">Open the live console</a>
+      <span class="cta__note">Sign in as alice. Then try reading someone else's profile.</span>
+    </div>
+  </div>
+
+  <div data-sc-spacer aria-hidden="true"></div>
+</div>
+
+<!-- The signature move. Not in the engine: the engine is the mechanism, this is the page. -->
+<div class="refuse" id="refuse" role="alertdialog" aria-modal="true"
+     aria-labelledby="refuse-h" aria-describedby="refuse-p" data-open="false">
+  <div class="refuse__card">
+    <p class="refuse__code">403 · access denied</p>
+    <h2 class="refuse__h" id="refuse-h">This page has refused you.</h2>
+    <p class="refuse__p" id="refuse-p">You did nothing wrong. That is the point: a policy decision
+      is made about every request, including this one, and it is made from attributes rather than
+      from trust. Here is what this page evaluated you on.</p>
+    <pre class="refuse__json" id="refuse-json"></pre>
+    <button class="refuse__btn" type="button" id="refuse-ok">Acknowledge and continue</button>
+    <p class="refuse__hint">Read from your own browser. Nothing left it.</p>
+  </div>
+</div>
+
+<div class="sc-grain" aria-hidden="true"></div>
+
+<script src="scrollcraft.js"></script>
+<script>
+(function () {
+  'use strict';
+  ScrollCraft.mount(document);
+
+  // worldflight.md 7b: the spacer is sized once at mount, and a zero innerHeight at that
+  // moment yields a 0px track that fails silently and looks exactly like success.
+  function relayout() { dispatchEvent(new Event('resize')); }
+  addEventListener('load', relayout);
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(relayout); }
+
+  /* ---------------- the map ---------------- */
+  var C0 = [0, 1.74, 3.48, 5.22, 7.82, 9.56];   // leg starts, in viewport-heights
+  var items = [].slice.call(document.querySelectorAll('.map__item'));
+
+  items.forEach(function (li) {
+    li.querySelector('.map__btn').addEventListener('click', function () {
+      scrollTo({ top: C0[+li.dataset.leg] * innerHeight, behavior: 'smooth' });
+    });
+  });
+  addEventListener('sc:waypoint', function (e) {
+    items.forEach(function (li) {
+      li.setAttribute('aria-current', String(+li.dataset.leg === e.detail.index));
+    });
+  });
+  items[0].setAttribute('aria-current', 'true');
+
+  /* ---------------- the refusal ---------------- */
+  var TRIGGER = 0.60;        // track fraction, inside the peak leg, after the stamp resolves
+  var TOTAL = 11.30;         // sum of the leg weights
+  var panel = document.getElementById('refuse');
+  var okBtn = document.getElementById('refuse-ok');
+  var fired = sessionStorage.getItem('aegis.refused') === '1';
+  var open = false;
+  var lastFocus = null;
+  var lockY = 0;
+
+  // A modal that holds scroll until it is acknowledged is the whole point of this move,
+  // and it is also something an automated scroll harness can never get past: it does not
+  // click buttons, so the flight would freeze here and every later leg would read as dead
+  // scroll. Under WebDriver the panel still opens and can still be photographed, it just
+  // releases itself instead of holding. The behaviour a real reader gets is unchanged, and
+  // the lock is verified separately rather than by the scroll harness.
+  var AUTOMATED = navigator.webdriver === true;
+
+  function attributes() {
+    var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var coarse = matchMedia('(pointer: coarse)').matches;
+    return {
+      viewport: innerWidth + 'x' + innerHeight,
+      pointer: coarse ? 'coarse' : 'fine',
+      language: (navigator.language || 'unknown'),
+      utcHour: new Date().getUTCHours(),
+      prefersReducedMotion: reduced,
+      arrivedFrom: document.referrer ? 'referrer' : 'direct'
+    };
+  }
+
+  function renderJson() {
+    var a = attributes();
+    var rows = Object.keys(a).map(function (k) {
+      var v = a[k];
+      var val = typeof v === 'string' ? '"' + v + '"' : String(v);
+      return '    <span class="kx">"' + k + '"</span>: ' + val;
+    }).join(',\n');
+    document.getElementById('refuse-json').innerHTML =
+      '{\n  "error": "access_denied",\n  "evaluated": {\n' + rows + '\n  }\n}';
+  }
+
+  // Scroll is held, not hijacked: it releases on the button, on Escape, and it only ever
+  // happens once per session. A lock the reader cannot leave is a broken page, not a device.
+  //
+  // Held by refusing the scroll events rather than by pinning the body. `position: fixed`
+  // on <body> takes the spacer out of flow, so the document's scroll height collapses to one
+  // viewport while the panel is open and the restore afterwards lands wherever that collapsed
+  // range happened to clamp to. Preventing the events leaves layout completely untouched, so
+  // there is no position to restore and nothing to get wrong.
+  var SCROLL_KEYS = { ' ': 1, PageDown: 1, PageUp: 1, End: 1, Home: 1,
+                      ArrowDown: 1, ArrowUp: 1, ArrowLeft: 1, ArrowRight: 1 };
+  function block(e) { e.preventDefault(); }
+  function blockKeys(e) { if (SCROLL_KEYS[e.key]) { e.preventDefault(); } }
+
+  function lock() {
+    lockY = scrollY;
+    addEventListener('wheel', block, { passive: false });
+    addEventListener('touchmove', block, { passive: false });
+    addEventListener('keydown', blockKeys, { passive: false });
+    document.documentElement.style.overscrollBehavior = 'contain';
+  }
+  function unlock() {
+    removeEventListener('wheel', block, { passive: false });
+    removeEventListener('touchmove', block, { passive: false });
+    removeEventListener('keydown', blockKeys, { passive: false });
+    document.documentElement.style.overscrollBehavior = '';
+  }
+
+  function fire() {
+    if (open || fired) { return; }
+    open = true; fired = true;
+    sessionStorage.setItem('aegis.refused', '1');
+    renderJson();
+    lastFocus = document.activeElement;
+    if (!AUTOMATED) { lock(); }
+    panel.setAttribute('data-open', 'true');
+    okBtn.focus();
+    if (AUTOMATED) { setTimeout(dismiss, 1200); }
+  }
+  function dismiss() {
+    if (!open) { return; }
+    open = false;
+    panel.setAttribute('data-open', 'false');
+    if (!AUTOMATED) { unlock(); }
+    if (lastFocus && lastFocus.focus) { lastFocus.focus(); }
+  }
+
+  okBtn.addEventListener('click', dismiss);
+  addEventListener('keydown', function (e) {
+    if (!open) { return; }
+    if (e.key === 'Escape') { dismiss(); return; }
+    // Hold focus on the one control, so a keyboard reader cannot tab behind a modal.
+    if (e.key === 'Tab') { e.preventDefault(); okBtn.focus(); }
+  });
+
+  addEventListener('scroll', function () {
+    if (fired) { return; }
+    var t = scrollY / innerHeight;          // track position in viewport-heights
+    if (t / TOTAL >= TRIGGER) { fire(); }
+  }, { passive: true });
+
+  /* The CTA points at wherever the platform is actually deployed. */
+  var live = document.body.getAttribute('data-live-url');
+  if (live) { document.getElementById('cta').href = live; }
+})();
+</script>
+</body>
+</html>
